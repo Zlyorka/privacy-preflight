@@ -1,0 +1,19 @@
+# 本機教材圖，不進 repo
+diagrams/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 本機設定與金鑰
+.env
+.env.*
+*.local
+*.pem
+*.key
+
+# OS
+Thumbs.db
+.DS_Store

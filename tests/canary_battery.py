@@ -1,20 +1,21 @@
-"""Adversarial battery: plant one canary per category in the repo and require the scanner to catch it.
+"""Adversarial battery: plant one canary per category and require the scanner to catch it.
 
-Run from the repository root:  python <this file>
-Every canary is assembled at run time so this script contains no literal that matches a detector.
+The canaries are planted in a **temporary export** of this repository, never in the working tree,
+so running the test cannot touch the index, the stash or a staged change of the person running it.
+
+Every canary is assembled at run time, so this file contains no literal that matches a detector.
+
+Run from the repository root:  python tests/canary_battery.py
+Exit 0 when every class is caught; 1 when one is missed.
 """
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parent.parent
 BS = chr(92)  # backslash, kept out of literals
-SCAN = ["python", "scripts/privacy_scan.py", "--repo", "."]
-
-
-def run(args):
-    proc = subprocess.run(SCAN + args, capture_output=True, text=True)
-    return proc.returncode, proc.stdout
-
 
 STAGED_CASES = [
     ("openai key", "cfg.py", 'K = "sk-' + 'A1b2C3d4E5f6G7h8I9j0K1l2"\n', "credential"),
@@ -24,51 +25,70 @@ STAGED_CASES = [
     ("phone", "tests/t_phone.py", 'P = "09' + '12-345-678"\n', "phone"),
     ("national id", "tests/t_id.py", 'I = "A1' + '23456789"\n', "national-id"),
     ("terms", "docs/about.md", "written by CanaryPerson\n", "identity-term"),
-    ("url credential", "docs/setup.md",
-     "https://deploy:" + "tok3n" + "@example.com/x\n", "url-credentials"),
-    ("private key", "keys/id.txt",
-     "-----BEGIN " + "RSA PRIVATE KEY-----placeholder\n", "credential"),
+    ("url credential", "docs/setup.md", "https://deploy:" + "tok3n" + "@example.com/x\n", "url-credentials"),
+    ("private key", "keys/id.txt", "-----BEGIN " + "RSA PRIVATE KEY-----placeholder\n", "credential"),
 ]
+
+
+def export(destination: Path) -> None:
+    """Copy the tracked files only, then make it a repository of its own."""
+    archive = subprocess.run(["git", "archive", "HEAD"], cwd=str(ROOT), capture_output=True)
+    if archive.returncode != 0:
+        raise SystemExit("canary battery: git archive failed — commit something first")
+    tar = subprocess.run(["tar", "-x", "-C", str(destination)], input=archive.stdout,
+                         capture_output=True)
+    if tar.returncode != 0:
+        raise SystemExit("canary battery: could not unpack the export: "
+                         + tar.stderr.decode("utf-8", "replace").strip())
+    subprocess.run(["git", "init", "-q"], cwd=str(destination), capture_output=True, check=True)
+    subprocess.run(["git", "config", "core.hooksPath", str(destination / ".no-hooks")],
+                   cwd=str(destination), capture_output=True, check=True)
+
+
+def scan(work: Path, args):
+    proc = subprocess.run([sys.executable, str(work / "scripts" / "privacy_scan.py"),
+                           "--repo", str(work)] + args, capture_output=True, text=True)
+    return proc.returncode, proc.stdout
 
 
 def main() -> int:
     failures = 0
-    for label, path, content, category in STAGED_CASES:
-        target = Path(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-        subprocess.run(["git", "add", "-f", "-A"], capture_output=True)
-        args = ["--staged"]
-        if category == "identity-term":
-            args += ["--term", "Canary" + "Person"]
-        code, out = run(args)
-        ok = code == 1 and category in out
-        print(f"  {'PASS' if ok else 'FAIL'}  {label} -> {category}")
+    with tempfile.TemporaryDirectory(prefix="privacy-battery-") as tmp:
+        work = Path(tmp) / "repo"
+        work.mkdir()
+        export(work)
+
+        for label, path, content, category in STAGED_CASES:
+            target = work / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+            subprocess.run(["git", "add", "-f", "-A"], cwd=str(work), capture_output=True)
+            args = ["--staged"]
+            if category == "identity-term":
+                args += ["--term", "Canary" + "Person"]
+            code, out = scan(work, args)
+            ok = code == 1 and category in out
+            print(f"  {'PASS' if ok else 'FAIL'}  {label} -> {category}")
+            failures += 0 if ok else 1
+            subprocess.run(["git", "reset", "-q"], cwd=str(work), capture_output=True)
+            target.unlink()
+
+        print("  -- full scan cases --")
+        subprocess.run(["git", "remote", "add", "canary",
+                        "https://user:" + "tok3n" + "@example.com/x.git"],
+                       cwd=str(work), capture_output=True)
+        code, out = scan(work, [])
+        ok = code == 1 and "remotes" in out
+        print(f"  {'PASS' if ok else 'FAIL'}  remote URL credential -> remotes")
         failures += 0 if ok else 1
-        subprocess.run(["git", "reset", "-q"], capture_output=True)
-        target.unlink()
-        for folder in ("tests", "docs", "keys"):
-            directory = Path(folder)
-            if directory.exists() and not any(directory.iterdir()):
-                directory.rmdir()
+        subprocess.run(["git", "remote", "remove", "canary"], cwd=str(work), capture_output=True)
 
-    # commit message and remote URL are not visible to --staged
-    print("  -- full scan cases --")
-    subprocess.run(["git", "remote", "add", "canary",
-                    "https://user:" + "tok3n" + "@example.com/x.git"], capture_output=True)
-    code, out = run([])
-    ok = code == 1 and "remotes" in out
-    print(f"  {'PASS' if ok else 'FAIL'}  remote URL credential -> remotes")
-    failures += 0 if ok else 1
-    subprocess.run(["git", "remote", "remove", "canary"], capture_output=True)
-
-    # a terms file inside the repository must be refused
-    Path("terms.txt").write_text("canary\n", encoding="utf-8")
-    proc = subprocess.run(SCAN + ["--terms-file", "terms.txt"], capture_output=True, text=True)
-    ok = proc.returncode == 2
-    print(f"  {'PASS' if ok else 'FAIL'}  terms file inside repo is refused -> exit 2")
-    failures += 0 if ok else 1
-    Path("terms.txt").unlink()
+        (work / "terms.txt").write_text("canary\n", encoding="utf-8")
+        code, _ = scan(work, ["--terms-file", str(work / "terms.txt")])
+        ok = code == 2
+        print(f"  {'PASS' if ok else 'FAIL'}  terms file inside repo is refused -> exit 2")
+        failures += 0 if ok else 1
+        (work / "terms.txt").unlink()
 
     total = len(STAGED_CASES) + 2
     print(f"battery: {total - failures}/{total}")

@@ -1,6 +1,6 @@
 ---
 name: privacy-preflight
-version: 1.1.0
+version: 1.1.1
 description: "Use before pushing a repo public: block personal leaks."
 author: Hermes Agent
 license: MIT
@@ -59,7 +59,7 @@ bash   <skill>/scripts/verify_gate.sh                    # 端到端證明：洩
 | 類別 | 內容 |
 |---|---|
 | credential | AWS / GitHub / OpenAI / Stripe / Slack / Google / Telegram / GitLab / npm token、私鑰、JWT、帶密碼的連線字串、URL 內嵌帳密 |
-| machine-path | `C:\Users\<帳號>\`、`/home/<帳號>/`、`/Users/<帳號>/`、UNC `\\<主機>\` |
+| machine-path | `<磁碟>:\Users\<帳號>\`、`/home/<帳號>/`、`/Users/<帳號>/`、UNC `\\<主機>` |
 | email | 非 `example.com` 之類佔位網域的地址 |
 | ip-address | 公網與內網 IPv4 |
 | phone | 台灣手機格式 `09xx-xxx-xxx` |
@@ -72,6 +72,8 @@ bash   <skill>/scripts/verify_gate.sh                    # 端到端證明：洩
 | untracked-file | 沒被 ignore 的敏感檔（下一次 `git add .` 就會進去） |
 
 掃描範圍：索引（也就是你真正會 commit 的內容）、`--all` 可達的每一個 blob（含已被刪除的檔案）、commit 身分、commit 訊息、`.git/config` 的 remote、untracked 檔。被刪掉的檔案仍會被報出來，因為刪除也是一顆 commit。
+
+文件裡的 `<account>`、`<host>`、`{name}` 這類角括號佔位符不算 finding —— 那是範例，不是機器。
 
 條款清單若被放進被掃的 repo 裡，工具會直接以退出碼 2 拒絕執行 —— 檢查器攜帶著它要查的名字，本身就是洩漏。
 
@@ -156,9 +158,10 @@ bash   <skill>/scripts/verify_gate.sh                # 真的 commit 與 push �
 
 ## 維護這個工具本身
 
-- 偵測用的假資料一律在執行時組字串（見 selftest 的 `drive` / `fake_key`），檔案裡不出現任何看起來像真的值。
+- 偵測用的假資料一律在執行時組字串（見 selftest 的 `drive` / `fake_key`），檔案裡不出現任何看起來像真的值。拆字串要拆在**偵測器命中的位置**上：email 拆在 `@` 兩側、電話拆在數字中間、路徑拆在磁碟機代號之後。只把字串斷成前後兩截仍會留下完整的一半 —— 右半邊單獨看就是一筆完整 email，掃描器會抓到自己的測試檔。加完 canary 後拿掃描器掃一次自己的 repo，那是唯一能證明它沒攜帶資料的方法。
 - 新增規則時同時加一個 selftest canary，讓它自己證明會紅。
 - 這支工具若被放進某個 repo，它就是自己的偵測器：用 `--allow` 標它，但條款清單照樣套用。
+- repo 內放一個守門測試（例：`tests/terms_guard.py`）：用**掃描器自己的 matcher** 讀 repo 外的條款清單、逐檔比對、只印條數不印字。它同時證明兩件事 —— 這個 repo 沒有任何一個識別字，而且比對規則沒有第二份實作可以漂移。
 
 ## 建置與驗證這類關卡的陷阱
 

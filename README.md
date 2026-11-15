@@ -65,7 +65,7 @@ Nothing is written into the project, so the project never gains a config file to
 |---|---|
 | credential | AWS, GitHub, OpenAI, Stripe, Slack, Google, Telegram, GitLab, npm tokens; private keys; JWTs; connection strings and URLs carrying a password |
 | sensitive-file | `.env`, `state.db`, `*.pem`, `id_rsa`, `credentials*`, `secrets*`, `mcp.json` |
-| machine-path | `C:\Users\<account>\`, `/home/<account>/`, `/Users/<account>/`, UNC `\\host\` |
+| machine-path | `<drive>:\Users\<account>\`, `/home/<account>/`, `/Users/<account>/`, UNC `<host>` |
 | email | any address that is not an obvious placeholder (RFC 2606 domains, noreply, git@) |
 | ip-address | public and LAN IPv4 |
 | phone | `09xx-xxx-xxx` |
@@ -76,8 +76,9 @@ Nothing is written into the project, so the project never gains a config file to
 | remotes | a remote URL in `.git/config` that carries a password or token |
 | untracked-file | sensitive files that are not ignored and would be added by `git add .` |
 
-Deleted files are still reported: deleting a file is another commit, and the old blob stays
-reachable.
+Documented placeholders such as `<account>`, `<host>` or `{name}` are not reported: an example
+is not a machine. Deleted files are still reported — deleting a file is another commit, and the
+old blob stays reachable.
 
 ## What it cannot catch
 

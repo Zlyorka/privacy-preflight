@@ -23,7 +23,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 # ---------------------------------------------------------------- detection patterns
 
@@ -53,6 +53,10 @@ PATH_PATTERNS = [
     ("home-path", re.compile(rb"/(?:home|Users)/[A-Za-z0-9._-]+/")),
     ("unc-path", re.compile(rb"\\\\[A-Za-z0-9._$-]+\\")),
 ]
+# A path whose next component is a documented placeholder reveals nothing. Without this the
+# scanner reports its own README for the example it exists to explain, and every clone starts red.
+PLACEHOLDER_NEXT = b"<{["  # a path whose next component opens with one of these is an example
+PLACEHOLDER_HOSTS = {b"host", b"server", b"hostname", b"example", b"your-host", b"yourhost"}
 
 EMAIL_RE = re.compile(rb"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 IPV4_RE = re.compile(rb"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
@@ -184,8 +188,15 @@ def scan_content(data: bytes, where: str, terms: list[bytes], findings: list[dic
     if not skip_paths:
         for name, pattern in PATH_PATTERNS:
             for match in pattern.finditer(data):
+                value = match.group(0)
+                # `C:\Users\<account>\` and `\\host\` are documentation, not a machine.
+                nxt = data[match.end():match.end() + 1]
+                if nxt and nxt[0] in PLACEHOLDER_NEXT:
+                    continue
+                if name == "unc-path" and value.strip(b"\\").split(b"\\")[0].lower() in PLACEHOLDER_HOSTS:
+                    continue
                 add(findings, "machine-path", where,
-                    f"{name} {match.group(0).decode('utf-8', 'replace')}",
+                    f"{name} {value.decode('utf-8', 'replace')}",
                     line_of(data, match.start()))
     for match in EMAIL_RE.finditer(data):
         value = match.group(0)
@@ -572,6 +583,17 @@ def selftest() -> int:
         expect("email in a test fixture is caught",
                proc.returncode == 1 and "email" in proc.stdout and "tests/test_contact.py" in proc.stdout,
                proc)
+
+        placeholder = make_repo(base / "placeholders")
+        bs = chr(92)
+        fake_path = "C" + ":" + bs + "Users" + bs + "<account>" + bs
+        fake_unc = bs + bs + "host" + bs
+        write(placeholder, "docs/examples.md", f"written as {fake_path} and {fake_unc} in docs\n")
+        subprocess.run(["git", "add", "-A"], cwd=str(placeholder), capture_output=True, check=True)
+        commit(placeholder, "init")
+        proc = run("--repo", str(placeholder))
+        expect("documented placeholders are not reported as machine paths",
+               proc.returncode == 0, proc)
 
         named = make_repo(base / "terms")
         write(named, "docs/about.md", f"{fake_term} wrote this.\n")

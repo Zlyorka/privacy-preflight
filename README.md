@@ -105,6 +105,14 @@ requires the scanner to report each one, then removes it again:
 python tests/canary_battery.py     # battery: 11/11
 ```
 
+`tests/terms_guard.py` proves the other half — that this repository carries none of your own
+identifiers. It reads the terms file from outside the repo, compares every tracked file with the
+scanner's own matcher, and prints counts only:
+
+```bash
+python tests/terms_guard.py        # 14 term(s) checked against 9 tracked file(s), 0 offending
+```
+
 A green scan means nothing until the scan has been seen to fail.
 
 ## License

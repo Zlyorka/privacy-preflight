@@ -1,6 +1,6 @@
 # Privacy preflight — full specification
 
-[繁體中文](../SKILL.md) · **English** · [简体中文](SKILL.zh-CN.md)
+[繁體中文](../SKILL.md) · **English** · [中文](SKILL.zh-CN.md)
 
 This is the English translation of the skill body. The loadable file an agent reads is
 [`../SKILL.md`](../SKILL.md) (Traditional Chinese); this page keeps every rule and number in sync.

@@ -1,6 +1,6 @@
 # privacy-preflight
 
-**English** · [繁體中文](README.zh-TW.md) · [简体中文](README.zh-CN.md)
+**English** · [繁體中文](README.zh-TW.md) · [中文](README.zh-CN.md)
 
 Publish a repository without leaking yourself.
 

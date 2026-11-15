@@ -1,6 +1,6 @@
 # privacy-preflight
 
-[English](README.md) · [繁體中文](README.zh-TW.md) · **简体中文**
+[English](README.md) · [繁體中文](README.zh-TW.md) · **中文**
 
 把仓库公开出去，不会顺手把自己也公开。
 

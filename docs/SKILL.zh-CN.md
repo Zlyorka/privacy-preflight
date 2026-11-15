@@ -1,8 +1,8 @@
 # Privacy preflight — 完整规格
 
-[繁體中文](../SKILL.md) · [English](SKILL.en.md) · **简体中文**
+[繁體中文](../SKILL.md) · [English](SKILL.en.md) · **中文**
 
-这是 skill 正文的简体中文版。Agent 实际加载的文件是 [`../SKILL.md`](../SKILL.md)（繁体中文）；
+这是 skill 正文的中文版。Agent 实际加载的文件是 [`../SKILL.md`](../SKILL.md)（繁体中文）；
 这一页保持同样的规则与数字。
 
 推送任何仓库到 GitHub 之前的隐私关卡。工具住在 skill 里，不装进项目；项目里一个文件都不会多。

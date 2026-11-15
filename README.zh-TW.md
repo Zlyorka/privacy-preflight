@@ -1,6 +1,6 @@
 # privacy-preflight
 
-[English](README.md) · **繁體中文** · [简体中文](README.zh-CN.md)
+[English](README.md) · **繁體中文** · [中文](README.zh-CN.md)
 
 把 repo 公開出去，不會順手把自己也公開。
 

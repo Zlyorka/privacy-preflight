@@ -14,7 +14,7 @@ metadata:
 
 推送任何 repo 到 GitHub 之前的隱私關卡。工具住在 skill 裡，不裝進專案；專案裡一個檔案都不會多。
 
-語言：本文件是繁體中文原文。English 版 `docs/SKILL.en.md`、简体中文版 `docs/SKILL.zh-CN.md`，README 也有三語（`README.md` / `README.zh-TW.md` / `README.zh-CN.md`）。
+語言：本文件是繁體中文原文。English 版 `docs/SKILL.en.md`、中文版 `docs/SKILL.zh-CN.md`，README 也有三語（`README.md` / `README.zh-TW.md` / `README.zh-CN.md`）。
 
 需求邊界：這是機器層級的通用工具，不是每個專案貼一份腳本。任何要求把掃描檔放進專案的方案都不符合；一次安裝、所有 repo 生效，設定留在 `~/.hermes/` 與 git config。
 

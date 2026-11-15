@@ -14,6 +14,8 @@ metadata:
 
 推送任何 repo 到 GitHub 之前的隱私關卡。工具住在 skill 裡，不裝進專案；專案裡一個檔案都不會多。
 
+語言：本文件是繁體中文原文。English 版 `docs/SKILL.en.md`、简体中文版 `docs/SKILL.zh-CN.md`，README 也有三語（`README.md` / `README.zh-TW.md` / `README.zh-CN.md`）。
+
 需求邊界：這是機器層級的通用工具，不是每個專案貼一份腳本。任何要求把掃描檔放進專案的方案都不符合；一次安裝、所有 repo 生效，設定留在 `~/.hermes/` 與 git config。
 
 ```bash
@@ -146,7 +148,7 @@ git config --add privacy.ignore 'tests/fixtures/.*canary'  # 你確認過是假�
 綠燈只有在看過紅燈之後才有意義。
 
 ```bash
-python <skill>/scripts/privacy_scan.py --selftest    # 15 個合成 canary，全部是假資料
+python <skill>/scripts/privacy_scan.py --selftest    # 16 個合成 canary，全部是假資料
 bash   <skill>/scripts/verify_gate.sh                # 真的 commit 與 push 一次，確認被擋
 ```
 
@@ -157,6 +159,7 @@ bash   <skill>/scripts/verify_gate.sh                # 真的 commit 與 push �
 1. `git status` 乾淨、`privacy_scan.py --repo .` 退出碼 0。
 2. 先推到 **private** repo，在 GitHub 的檔案清單裡用陌生人的眼睛看一遍路徑。
 3. 再改 public。改完用匿名請求確認 `raw.githubusercontent.com` 讀得到（private 會讓 catalog 與安裝流程無聲失敗）。
+4. 最後跑一次「陌生人的環境」：`git clone <public-url>` 到臨時目錄，在那份副本上跑掃描器與專案自己的測試。本機的 `privacy.allow`、`--ignore`、`--term` 都不會被 push，靠它們豁免的東西只有這一步會現形。
 
 ## 它抓不到什麼
 
@@ -196,6 +199,12 @@ bash   <skill>/scripts/verify_gate.sh                # 真的 commit 與 push �
   repo 裡測「移掉檔案再推」：歷史仍有那顆 commit，乾淨推送要用一個全新的 repo。
 - **歷史掃描是秒級到分鐘級，不要用短 timeout。** 數十顆 commit 約數秒、數百顆更久；跑驗證或計時時
   把 timeout 開到 300 秒以上，兩個實例並行會互相拖到超時。
+- **隨 repo 出貨的測試不得動到使用者的索引。** 直接在專案裡 `git add` 種 canary、跑完 `git reset`，
+  會把使用者當下暫存的工作全部退掉（症狀：自己 `git add -A` 之後 commit 卻說「沒有暫存」）。
+  改成 `git archive HEAD` 解到臨時目錄、在那裡 `git init` 再種；測試與被測對象的索引就分開了。
+- **本機通過不等於陌生人通過。** 用 `git config privacy.allow` 讓專案自己的文件範例過關，那份設定不會被 push，
+  每個 clone 一跑就回到 DO NOT PUBLISH。能在偵測器裡修掉的誤報（例如把 `<account>`、`<host>` 這種角括號佔位符
+  排除）就修，不要用 allow 掩蓋；掩蓋過的豁免一定要再用匿名 clone 重驗一次。
 
 ## 參考
 

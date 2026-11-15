@@ -23,7 +23,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-VERSION = "1.1.1"
+VERSION = "1.2.0"
 
 # ---------------------------------------------------------------- detection patterns
 
@@ -74,13 +74,21 @@ PLACEHOLDER_IPS = {b"0.0.0.0", b"127.0.0.1", b"255.255.255.0", b"255.255.255.255
 SENSITIVE_FILE = re.compile(
     r"(^|/)(?:"
     r"\.env(?:\.[^/]*)?|\.netrc|\.npmrc|\.pgpass|\.htpasswd|"
-    r"id_(?:rsa|ed25519|ecdsa|dsa)|state\.db|"
+    r"\.bash_history|\.zsh_history|\.python_history|"
+    r"authorized_keys|known_hosts|"
+    r"id_(?:rsa|ed25519|ecdsa|dsa)(?:\.pub)?|"
+    r"state\.db|[^/]*\.(?:db|sqlite|sqlite3)|[^/]*\.har|"
     r"(?:credentials|secrets?|auth|mcp)(?:\.(?:json|ya?ml|txt|ini|env))?|"
-    r"[^/]*\.(?:pem|key|p12|pfx|jks|keystore|ppk|kdbx|ovpn)"
+    r"[^/]*\.(?:pem|key|p12|pfx|jks|keystore|ppk|kdbx|ovpn|pub)"
     r")$",
     re.IGNORECASE,
 )
-PLACEHOLDER_FILE_HINT = re.compile(r"(example|sample|template|dist|placeholder)", re.IGNORECASE)
+# Only a name that *is* a template is exempt: `.env.dist` yes, `dist.pem` no.
+PLACEHOLDER_FILE_HINT = re.compile(
+    r"(?:[._-](?:example|sample|template|placeholder)|"
+    r"\.(?:dist|example|sample|template|placeholder))$",
+    re.IGNORECASE,
+)
 
 # Words used as a file-extensions whitelist for `--staged` speed; anything else is still scanned
 # by size only.
@@ -98,7 +106,11 @@ CATEGORY_ORDER = [
 
 def git(repo: Path, *args: str, stdin: bytes | None = None, check: bool = True
         ) -> bytes:
-    proc = subprocess.run(["git", *args], cwd=str(repo), capture_output=True, input=stdin)
+    # core.quotePath: make non-ASCII paths come out raw on every git build and config.
+    # core.fsmonitor: `git status` would otherwise execute a command named in the scanned
+    # repository's own .git/config — a hostile repository could run code through the scan.
+    proc = subprocess.run(["git", "-c", "core.quotePath=false", "-c", "core.fsmonitor=false",
+                           *args], cwd=str(repo), capture_output=True, input=stdin)
     if check and proc.returncode != 0:
         raise RuntimeError(f"git {args[0]} failed: "
                            f"{proc.stderr.decode('utf-8', 'replace').strip()}")
@@ -111,6 +123,12 @@ def is_binary(data: bytes) -> bool:
 
 def line_of(data: bytes, offset: int) -> int:
     return data.count(b"\n", 0, offset) + 1
+
+
+def normalize_path(value: str) -> str:
+    """Strip a leading ./ only. `lstrip('./')` would eat the dot of `.github/x`."""
+    value = value.strip()
+    return value[2:] if value.startswith("./") else value
 
 
 def add(findings: list[dict], category: str, where: str, detail: str, line: int | None = None) -> None:
@@ -174,6 +192,13 @@ def term_hits(text_lower: bytes, terms: list[bytes]) -> list[bytes]:
 
 def scan_content(data: bytes, where: str, terms: list[bytes], findings: list[dict],
                  *, skip_paths: bool = False) -> None:
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        # UTF-16 text is common on Windows (PowerShell output, .reg files). Its NUL bytes used to
+        # make is_binary() skip the whole file, so every one of them escaped the scan.
+        try:
+            data = data.decode("utf-16", "replace").encode("utf-8")
+        except (UnicodeDecodeError, LookupError):
+            return
     if is_binary(data):
         return
     seen: set[tuple[int, str]] = set()
@@ -315,15 +340,16 @@ def scan_index(repo: Path, terms: list[bytes], findings: list[dict], allow: set[
                 add(findings, "sensitive-file", where, f"inside data directory {directory}")
                 break
     shas = sorted({sha for _path, sha in selected})
-    contents = batch_blobs(repo, shas)
-    sizes = {sha: len(data) for sha, data in contents.items()}
+    kinds = batch_check(repo, shas)
+    scannable = [sha for sha in shas if kinds.get(sha, ("", 0))[1] <= MAX_TEXT_BYTES]
+    contents = batch_blobs(repo, scannable)
     for path, sha in selected:
         data = contents.get(sha)
-        if data is None:
-            continue
         where = f"tree: {path}"
-        if len(data) > MAX_TEXT_BYTES:
-            add(findings, "sensitive-file", where, f"{len(data)} bytes, too large to scan")
+        size = kinds.get(sha, ("", 0))[1]
+        if data is None:
+            if size > MAX_TEXT_BYTES:
+                add(findings, "sensitive-file", where, f"{size} bytes, too large to scan")
             continue
         if len(data) > 200_000:
             add(findings, "sensitive-file", where, f"large file {len(data)} bytes, review by hand")
@@ -347,9 +373,11 @@ def scan_history(repo: Path, terms: list[bytes], findings: list[dict], allow: se
     if len(blob_paths) > max_objects:
         print(f"warning: {len(blob_paths)} objects exceed --max-objects {max_objects}; "
               f"history scan is partial", file=sys.stderr)
-    shas = sorted(blob_paths)[:max_objects]
-    kinds = batch_check(repo, shas)
-    blobs = [sha for sha in shas if kinds.get(sha, ("", 0))[0] == "blob"]
+    all_shas = sorted(blob_paths)
+    kinds = batch_check(repo, all_shas)
+    blobs_all = [sha for sha in all_shas if kinds.get(sha, ("", 0))[0] == "blob"]
+    truncated = len(blobs_all) > max_objects
+    blobs = blobs_all[:max_objects]
     wanted = [sha for sha in blobs if kinds[sha][1] <= LARGE_BLOB_BYTES]
     for sha in blobs:
         size = kinds[sha][1]
@@ -371,7 +399,7 @@ def scan_history(repo: Path, terms: list[bytes], findings: list[dict], allow: se
                     break
         scan_content(data, where, terms, findings,
                      skip_paths=all(candidate in allow for candidate in paths))
-    return len(blobs), contents and 1 or 0
+    return len(blobs), truncated
 
 
 def scan_identities(repo: Path, terms: list[bytes], findings: list[dict]) -> int:
@@ -425,11 +453,42 @@ def scan_remote_urls(repo: Path, findings: list[dict]) -> int:
     return count
 
 
-def config_values(repo: Path, key: str) -> list[str]:
-    """Per-repository settings live in git config so the project never gains a config file.
-    The scanner reads them too, otherwise the hooks and a manual run drift apart."""
-    out = git(repo, "config", "--get-all", key, check=False)
+def config_values(repo: Path, key: str, *, scope: str = "--global") -> list[str]:
+    """Settings that decide what to *ignore* must not be readable from the repository being
+    scanned: a hostile repo could ship `privacy.ignore = .*` in its own .git/config and silence
+    every finding. Only the user's global config is trusted unless --trust-repo-config is given."""
+    out = git(repo, "config", scope, "--get-all", key, check=False)
     return [line.strip() for line in out.decode("utf-8", "replace").splitlines() if line.strip()]
+
+
+def scan_tags(repo: Path, terms: list[bytes], findings: list[dict]) -> int:
+    """An annotated tag carries its own tagger identity and message, separate from any commit.
+    `git log` never shows them, so a tag made before the author email was anonymised still
+    publishes the real name on the repository's Tags page."""
+    out = git(repo, "for-each-ref", "refs/tags",
+              "--format=%(refname:short)%1f%(taggername)%1f%(taggeremail)%1f%(contents)")
+    count = 0
+    for line in out.decode("utf-8", "replace").splitlines():
+        name, _, rest = line.partition("\x1f")
+        tagger_name, _, rest = rest.partition("\x1f")
+        tagger_email, _, message = rest.partition("\x1f")
+        if not tagger_name and not message.strip():
+            continue  # lightweight tag: only points at a commit, nothing of its own to leak
+        count += 1
+        where = f"tag: {name}"
+        if tagger_name or tagger_email:
+            email = tagger_email.strip("<> ")
+            low = email.lower().encode()
+            if email and not (low.endswith(b"@localhost") or b"noreply" in low
+                              or any(low.endswith(b"@" + d) for d in PLACEHOLDER_EMAIL_DOMAINS)):
+                add(findings, "commit-identity", where, f"tagger {tagger_name} <{email}> is not a placeholder")
+            for term in terms:
+                if term.lower() in tagger_name.lower().encode() or term.lower() in low:
+                    add(findings, "commit-identity", where,
+                        f"tagger contains the term {term.decode('utf-8', 'replace')}")
+        if message.strip():
+            scan_content(message.encode(), f"tag-message: {name}", terms, findings)
+    return count
 
 
 def scan_untracked(repo: Path, findings: list[dict]) -> int:
@@ -595,6 +654,45 @@ def selftest() -> int:
         expect("documented placeholders are not reported as machine paths",
                proc.returncode == 0, proc)
 
+        utf16 = make_repo(base / "utf16")
+        (base / "utf16" / "notes.txt").write_bytes(f'KEY = "{fake_key}"\n'.encode("utf-16"))
+        subprocess.run(["git", "add", "-A"], cwd=str(utf16), capture_output=True, check=True)
+        commit(utf16, "init")
+        proc = run("--repo", str(utf16))
+        expect("a UTF-16 text file is decoded instead of skipped as binary",
+               proc.returncode == 1 and "credential" in proc.stdout, proc)
+
+        tagged = make_repo(base / "tags")
+        write(tagged, "README.md", "# demo\n")
+        subprocess.run(["git", "add", "-A"], cwd=str(tagged), capture_output=True, check=True)
+        commit(tagged, "init")
+        subprocess.run(["git", "-c", f"user.name={fake_term}", "-c", "user.email=dev@localhost",
+                        "tag", "-a", "v1", "-m", "release"], cwd=str(tagged),
+                       capture_output=True, check=True)
+        proc = run("--repo", str(tagged), "--term", fake_term)
+        expect("an annotated tag's tagger name is caught",
+               proc.returncode == 1 and "tag: v1" in proc.stdout, proc)
+
+        keyfile = make_repo(base / "keyfile")
+        write(keyfile, "certs/dist.pem", "placeholder\n")
+        write(keyfile, ".env.dist", "TOKEN=placeholder\n")
+        subprocess.run(["git", "add", "-A"], cwd=str(keyfile), capture_output=True, check=True)
+        commit(keyfile, "init")
+        proc = run("--repo", str(keyfile))
+        expect("dist.pem is not mistaken for a template file",
+               proc.returncode == 1 and "certs/dist.pem" in proc.stdout, proc)
+        expect(".env.dist is treated as a template", ".env.dist" not in proc.stdout, proc)
+
+        silenced = make_repo(base / "silenced")
+        write(silenced, "config.py", f'KEY = "{fake_key}"\n')
+        subprocess.run(["git", "add", "-A"], cwd=str(silenced), capture_output=True, check=True)
+        commit(silenced, "init")
+        subprocess.run(["git", "config", "privacy.ignore", ".*"], cwd=str(silenced),
+                       capture_output=True, check=True)
+        proc = run("--repo", str(silenced))
+        expect("a repository cannot silence the scan through its own .git/config",
+               proc.returncode == 1 and "credential" in proc.stdout, proc)
+
         named = make_repo(base / "terms")
         write(named, "docs/about.md", f"{fake_term} wrote this.\n")
         subprocess.run(["git", "add", "-A"], cwd=str(named), capture_output=True, check=True)
@@ -716,6 +814,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--data-dirs", default="",
                         help="comma-separated directory names that must never be in the repo, "
                              "e.g. cases,work,probe")
+    parser.add_argument("--trust-repo-config", action="store_true",
+                        help="also read privacy.allow / privacy.ignore / privacy.dataDirs from the "
+                             "scanned repository's own .git/config; a hostile repository can use "
+                             "that to silence itself, so it is off by default")
+    parser.add_argument("--require-terms", action="store_true",
+                        help="exit 2 when no terms list is available; the hooks use this so a "
+                             "missing list cannot silently downgrade the gate")
     parser.add_argument("--staged", action="store_true",
                         help="scan only what is staged (fast; for a pre-commit hook)")
     parser.add_argument("--no-history", action="store_true", help="skip the all-commit scan")
@@ -752,44 +857,68 @@ def main(argv: list[str] | None = None) -> int:
     if terms_count == 0:
         print("warning: no terms file and no --term given — names, schools and employers cannot "
               "be detected", file=sys.stderr)
-    allow = {path.strip().lstrip("./") for path in args.allow}
-    allow.update(path.lstrip("./") for path in config_values(repo, "privacy.allow"))
-    args.ignore = list(args.ignore) + config_values(repo, "privacy.ignore")
+        if args.require_terms:
+            print("error: --require-terms was given and no terms list was found; refusing to run",
+                  file=sys.stderr)
+            return 2
+    allow = {normalize_path(path) for path in args.allow}
+    scope = None if args.trust_repo_config else "--global"
+    if scope:
+        allow.update(normalize_path(path) for path in config_values(repo, "privacy.allow"))
+        args.ignore = list(args.ignore) + config_values(repo, "privacy.ignore")
+    else:
+        allow.update(normalize_path(path) for path in config_values(repo, "privacy.allow", scope="--local"))
+        args.ignore = list(args.ignore) + config_values(repo, "privacy.ignore", scope="--local")
     data_dirs = [part.strip() for part in args.data_dirs.split(",") if part.strip()]
-    for value in config_values(repo, "privacy.dataDirs"):
+    for value in config_values(repo, "privacy.dataDirs", scope=scope or "--local"):
         data_dirs.extend(part.strip() for part in value.split(",") if part.strip())
 
     findings: list[dict] = []
     notes: list[str] = []
     stats: dict[str, int] = {}
 
+    truncated = False
     if args.staged:
         staged_out = git(repo, "diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z")
         staged_paths = [record.decode("utf-8", "replace")
                         for record in staged_out.split(b"\x00") if record]
         stats["tree"] = scan_index(repo, terms, findings, allow, data_dirs, staged_paths)
+        notes.append("staged only: history, identities, tags, messages and remotes are NOT scanned")
     else:
         stats["tree"] = scan_index(repo, terms, findings, allow, data_dirs)
         if not args.no_history:
-            stats["history"], _ = scan_history(repo, terms, findings, allow, data_dirs,
-                                               args.max_objects)
+            stats["history"], truncated = scan_history(repo, terms, findings, allow, data_dirs,
+                                                       args.max_objects)
         stats["identities"] = scan_identities(repo, terms, findings)
+        stats["tags"] = scan_tags(repo, terms, findings)
         stats["messages"] = scan_commit_messages(repo, terms, findings, allow)
         stats["remotes"] = scan_remote_urls(repo, findings)
         stats["untracked"] = scan_untracked(repo, findings)
         check_gitignore(repo, notes)
 
     if args.ignore:
-        patterns = [re.compile(pattern) for pattern in args.ignore]
+        try:
+            patterns = [re.compile(pattern) for pattern in args.ignore]
+        except re.error as exc:
+            print(f"error: an --ignore pattern is not a valid regex: {exc}", file=sys.stderr)
+            return 2
         before = len(findings)
         findings = [finding for finding in findings
-                    if not any(pattern.search(f"{finding['where']} {finding['detail']}")
+                    if not any(pattern.search(f"{finding['category']} {finding['where']} {finding['detail']}")
                                for pattern in patterns)]
-        if before - len(findings):
-            notes.append(f"{before - len(findings)} finding(s) dropped by --ignore")
+        dropped = before - len(findings)
+        if dropped:
+            notes.append(f"{dropped} finding(s) dropped by --ignore")
+            if dropped == before and before:
+                # Everything was suppressed: say so loudly rather than reporting a silent clean.
+                notes.append("WARNING: --ignore removed every finding of this run")
 
     source = str(terms_file) if terms_file else "no terms file"
     exit_code = report(findings, notes, terms_count, source, stats)
+    if truncated:
+        print("error: the history scan stopped at --max-objects, so it cannot say 'clean'; "
+              "raise the limit and run again", file=sys.stderr)
+        exit_code = 2
 
     if args.report:
         payload = {

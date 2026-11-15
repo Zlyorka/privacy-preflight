@@ -59,8 +59,11 @@ git -C "$work_native/leaky" add -A
 
 if git -C "$work_native/leaky" "${ident[@]}" commit -q -m "add config" >"$work/commit.log" 2>&1; then
   bad "a commit with a fake credential was accepted"
+elif grep -q "DO NOT PUBLISH" "$work/commit.log"; then
+  ok "a commit with a fake credential was blocked by the scanner"
 else
-  ok "a commit with a fake credential was blocked"
+  bad "the commit failed, but not because the scanner reported the credential — read the log"
+  sed -n '1,20p' "$work/commit.log"
 fi
 
 printf '\n== 4. the push gate blocks a leak that is already committed\n'
@@ -72,8 +75,11 @@ else
 fi
 if git -C "$work_native/leaky" push -q origin HEAD:main >"$work/push1.log" 2>&1; then
   bad "push of a committed fake credential succeeded — the gate is open"
+elif grep -q "DO NOT PUBLISH" "$work/push1.log"; then
+  ok "push of a committed fake credential was blocked by the scanner"
 else
-  ok "push of a committed fake credential was blocked"
+  bad "the push failed, but not because the scanner reported the credential — read the log"
+  sed -n '1,20p' "$work/push1.log"
 fi
 
 printf '\n== 5. a clean repository pushes normally\n'

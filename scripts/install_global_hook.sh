@@ -83,15 +83,9 @@ fi
 py=python3
 command -v python3 >/dev/null 2>&1 || py=python
 
-args=()
-data_dirs="$(git config --get privacy.dataDirs 2>/dev/null || true)"
-[ -n "$data_dirs" ] && args+=("--data-dirs" "$data_dirs")
-while IFS= read -r value; do
-  [ -n "$value" ] && args+=("--allow" "$value")
-done < <(git config --get-all privacy.allow 2>/dev/null || true)
-while IFS= read -r value; do
-  [ -n "$value" ] && args+=("--ignore" "$value")
-done < <(git config --get-all privacy.ignore 2>/dev/null || true)
+# The scanner reads privacy.allow / privacy.ignore from the *global* git config itself.
+# Re-reading them here would let a repository's own .git/config silence the gate.
+args=(--require-terms)
 
 if ! "$py" "$scanner" --repo "$root" ${args[@]+"${args[@]}"}; then
   printf '\nprivacy-preflight: push blocked. Fix each line above, or --no-verify to override.\n' >&2
@@ -126,15 +120,9 @@ fi
 py=python3
 command -v python3 >/dev/null 2>&1 || py=python
 
-args=()
-data_dirs="$(git config --get privacy.dataDirs 2>/dev/null || true)"
-[ -n "$data_dirs" ] && args+=("--data-dirs" "$data_dirs")
-while IFS= read -r value; do
-  [ -n "$value" ] && args+=("--allow" "$value")
-done < <(git config --get-all privacy.allow 2>/dev/null || true)
-while IFS= read -r value; do
-  [ -n "$value" ] && args+=("--ignore" "$value")
-done < <(git config --get-all privacy.ignore 2>/dev/null || true)
+# The scanner reads privacy.allow / privacy.ignore from the *global* git config itself.
+# Re-reading them here would let a repository's own .git/config silence the gate.
+args=(--require-terms)
 
 if ! "$py" "$scanner" --repo "$root" --staged ${args[@]+"${args[@]}"}; then
   printf '\nprivacy-preflight: commit blocked. Fix each line above, or --no-verify to override.\n' >&2

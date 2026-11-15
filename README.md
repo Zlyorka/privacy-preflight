@@ -64,14 +64,14 @@ Nothing is written into the project, so the project never gains a config file to
 | Category | Contents |
 |---|---|
 | credential | AWS, GitHub, OpenAI, Stripe, Slack, Google, Telegram, GitLab, npm tokens; private keys; JWTs; connection strings and URLs carrying a password |
-| sensitive-file | `.env`, `state.db`, `*.pem`, `id_rsa`, `credentials*`, `secrets*`, `mcp.json` |
+| sensitive-file | `.env`, `state.db`, `*.db`, `*.sqlite`, `*.har`, `*.pem`, `id_rsa`, `*.pub`, `authorized_keys`, shell history, `credentials*`, `secrets*`, `mcp.json` |
 | machine-path | `<drive>:\Users\<account>\`, `/home/<account>/`, `/Users/<account>/`, UNC `<host>` |
 | email | any address that is not an obvious placeholder (RFC 2606 domains, noreply, git@) |
 | ip-address | public and LAN IPv4 |
 | phone | `09xx-xxx-xxx` |
 | national-id | one letter + 1/2 + eight digits |
 | identity-term | every word in your terms list |
-| commit-identity | author and committer of every commit |
+| commit-identity | author and committer of every commit, plus annotated tag taggers and tag messages |
 | commit-message | the message body of every commit |
 | remotes | a remote URL in `.git/config` that carries a password or token |
 | untracked-file | sensitive files that are not ignored and would be added by `git add .` |

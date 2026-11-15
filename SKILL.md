@@ -1,6 +1,6 @@
 ---
 name: privacy-preflight
-version: 1.1.1
+version: 1.2.0
 description: "Use before pushing a repo public: block personal leaks."
 author: Hermes Agent
 license: MIT
@@ -65,8 +65,8 @@ bash   <skill>/scripts/verify_gate.sh                    # 端到端證明：洩
 | phone | 台灣手機格式 `09xx-xxx-xxx` |
 | national-id | 台灣身分證格式（一碼英文 + 1/2 + 8 碼數字） |
 | identity-term | 條款清單裡的每個字 |
-| sensitive-file | `.env`、`state.db`、`*.pem`、`id_rsa`、`credentials*`、`secrets*`、`mcp.json` 等 |
-| commit-identity | 每顆 commit 的 author / committer，email 不是佔位值就報 |
+| sensitive-file | `.env`、`state.db`、`*.db`、`*.sqlite`、`*.har`、`*.pem`、`id_rsa`、`*.pub`、`authorized_keys`、`.bash_history`、`credentials*`、`secrets*`、`mcp.json` 等 |
+| commit-identity | 每顆 commit 的 author / committer，加上 annotated tag 的 tagger 與訊息；email 不是佔位值就報 |
 | commit-message | 每顆 commit 的訊息本文（最常被拿去寫真名或工單網址） |
 | remotes | `.git/config` 裡帶帳密的 remote URL（檔案掃描看不到） |
 | untracked-file | 沒被 ignore 的敏感檔（下一次 `git add .` 就會進去） |
@@ -119,6 +119,16 @@ git config --add privacy.ignore 'tests/fixtures/.*canary'  # 你確認過是假�
 ```
 
 `--allow` 只跳過 machine-path；憑證、email、IP、條款字在那個檔案裡照樣檢查。`--ignore` 用在假金鑰、示範用的假 email，正則比對 `<位置> <內容>`。
+
+**遮蔽設定只從全域 git config 讀。** `privacy.allow`、`privacy.ignore`、`privacy.dataDirs` 預設取自
+`git config --global`；被掃 repo 自己的 `.git/config` 不採信 —— 否則惡意 repo 只要寫一行
+`privacy.ignore = .*` 就能讓自己全數過關。真的要以 repo 設定為準時加 `--trust-repo-config`。
+
+**缺條款清單就當場停手。** hook 一律帶 `--require-terms`：沒有清單時退出碼 2，而不是印個警告就說 clean。
+
+**二進位與編碼。** UTF-16（Windows PowerShell 輸出、`.reg`）會先解碼再掃，不再因為 NUL 位元組被當成
+二進位跳過。掃描時所有 git 呼叫都帶 `-c core.quotePath=false -c core.fsmonitor=false`：前者讓非 ASCII
+檔名在任何 git 版本都原樣輸出，後者避免 `git status` 執行被掃 repo 自己 `.git/config` 指名的程式。
 
 ## 讀輸出
 

@@ -43,6 +43,12 @@ def export(destination: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=str(destination), capture_output=True, check=True)
     subprocess.run(["git", "config", "core.hooksPath", str(destination / ".no-hooks")],
                    cwd=str(destination), capture_output=True, check=True)
+    # A real HEAD, so `git reset` after each case actually clears the index and the cases stay
+    # independent of each other.
+    subprocess.run(["git", "add", "-A"], cwd=str(destination), capture_output=True, check=True)
+    subprocess.run(["git", "-c", "user.name=battery", "-c", "user.email=battery@localhost",
+                    "commit", "-q", "-m", "export"], cwd=str(destination),
+                   capture_output=True, check=True)
 
 
 def scan(work: Path, args):

@@ -68,7 +68,7 @@ Use `--force` to take over a `core.hooksPath` that is already set, and `--uninst
 python scripts/privacy_scan.py --repo .                     # audit
 python scripts/privacy_scan.py --repo . --report out.json    # machine-readable report
 python scripts/privacy_scan.py --repo . --require-terms      # refuse to run without a terms list
-python scripts/privacy_scan.py --selftest                    # 23 synthetic canaries
+python scripts/privacy_scan.py --selftest                    # 26 synthetic canaries
 ```
 
 Exit codes: `0` clean, `1` findings, `2` the scan could not run.
@@ -130,6 +130,7 @@ into the terms list or a detector rule. Full playbook: `references/llm-review.md
 | commit-message | the message body of every commit |
 | remotes | a remote URL in `.git/config` that carries a password or token |
 | untracked-file | sensitive files that are not ignored and would be added by `git add .` |
+| unreachable | objects no ref points at (an amended commit, a rebased branch): reported only with `--dangling` |
 
 Documented placeholders such as `<account>`, `<host>` or `{name}` are not reported: an example is
 not a machine. Deleted files are still reported — deleting a file is another commit, and the old
@@ -152,7 +153,7 @@ the scanned repository's own `.git/config`.
 
 ## What it cannot catch
 
-- Text and EXIF inside images, PDFs and other binaries — they are not parsed.
+- Text and EXIF inside images, PDFs and other binaries — they are not parsed. Git LFS files are reported as pointers whose content was never read, never as clean.
 - Data assembled at runtime from a database or an API.
 - A name that is not in your terms list. The tool does not know who you are.
 - Meaning: a sentence that describes you without containing a comparable literal.
@@ -164,7 +165,7 @@ the scanned repository's own `.git/config`.
 `--selftest` builds synthetic canaries for every category and fails if one is missed:
 
 ```bash
-python scripts/privacy_scan.py --selftest    # selftest: 23/23 passed
+python scripts/privacy_scan.py --selftest    # selftest: 26/26 passed
 ```
 
 `verify_gate.sh` creates a temporary repository, commits a fake credential, and asserts that the

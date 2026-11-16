@@ -65,7 +65,7 @@ python /tmp/pp/scripts/privacy_scan.py --repo .
 python scripts/privacy_scan.py --repo .                     # 稽核
 python scripts/privacy_scan.py --repo . --report out.json    # 機器可讀報告
 python scripts/privacy_scan.py --repo . --require-terms      # 沒有條款清單就拒絕執行
-python scripts/privacy_scan.py --selftest                    # 23 個合成 canary
+python scripts/privacy_scan.py --selftest                    # 26 個合成 canary
 ```
 
 退出碼：`0` 乾淨、`1` 有 finding、`2` 掃不起來。
@@ -123,6 +123,7 @@ LLM 層不是關卡：它不確定、不可重放、可以被注入。確認過�
 | commit-message | 每顆 commit 的訊息本文 |
 | remotes | `.git/config` 裡帶密碼或 token 的 remote URL |
 | untracked-file | 沒被 ignore、下一次 `git add .` 就會進去的敏感檔 |
+| unreachable | 沒有任何 ref 指到的物件（amend 掉的舊 commit、rebase 掉的分支）：加 `--dangling` 才掃 |
 
 文件裡的 `<account>`、`<host>`、`{name}` 這類佔位符不算 finding —— 範例不是機器。被刪掉的檔案
 仍會被報出來，因為刪除也是一顆 commit，舊 blob 依然可達。UTF-16 的文字（PowerShell 輸出、`.reg`）
@@ -143,7 +144,7 @@ git 版本都原樣輸出，後者避免 `git status` 去執行被掃 repo 自�
 
 ## 它抓不到什麼
 
-- 圖片、PDF 與其他二進位檔裡的文字與 EXIF —— 不解析。
+- 圖片、PDF 與其他二進位檔裡的文字與 EXIF —— 不解析。Git LFS 的檔案只掃到指標，會明確報成「內容沒被讀到」，不會假裝乾淨。
 - 執行時才組出來的資料（從資料庫、API 讀進來）。
 - 你沒列進條款清單的名字。工具不知道誰是誰。
 - 語意：一句話描述你，卻不含任何可比對的字串。
@@ -154,7 +155,7 @@ git 版本都原樣輸出，後者避免 `git status` 去執行被掃 repo 自�
 `--selftest` 為每個類別造一個合成 canary，漏抓任何一個就失敗：
 
 ```bash
-python scripts/privacy_scan.py --selftest    # selftest: 23/23 passed
+python scripts/privacy_scan.py --selftest    # selftest: 26/26 passed
 ```
 
 `verify_gate.sh` 建一個臨時 repo、commit 一個假憑證，並要求 commit 是**因為掃描器報出來**才被擋 ——

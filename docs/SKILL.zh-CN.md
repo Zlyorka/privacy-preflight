@@ -68,6 +68,7 @@ hook 一律带 `--require-terms`，在它们那里空清单是退出码 2。
 | commit-message | 每颗 commit 的信息正文（最常被拿去写真名或工单网址） |
 | remotes | `.git/config` 里带账号密码的 remote URL（文件扫描看不到） |
 | untracked-file | 没被 ignore 的敏感文件（下一次 `git add .` 就会进去） |
+| unreachable | 没有任何 ref 指到的物件（amend 掉的旧 commit、rebase 掉的分支）；加 `--dangling` 才扫，push 不会送出它们 |
 
 扫描范围：索引（也就是你真正会 commit 的内容）、`--all` 可达的每一个 blob（含已被删除的文件）、
 commit 身份、commit 信息、`.git/config` 的 remote、untracked 文件。被删掉的文件仍会被报出来，

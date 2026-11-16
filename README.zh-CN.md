@@ -123,6 +123,7 @@ LLM 层不是关卡：它不确定、不可重放、可以被注入。确认过�
 | commit-message | 每颗 commit 的信息正文 |
 | remotes | `.git/config` 里带密码或 token 的 remote URL |
 | untracked-file | 没被 ignore、下一次 `git add .` 就会进去的敏感文件 |
+| unreachable | 没有任何 ref 指到的物件（amend 掉的旧 commit、rebase 掉的分支）：加 `--dangling` 才扫 |
 
 文档里的 `<account>`、`<host>`、`{name}` 这类占位符不算 finding —— 示例不是机器。被删掉的文件
 仍会被报出来，因为删除也是一颗 commit，旧 blob 依然可达。UTF-16 的文本（PowerShell 输出、`.reg`）
@@ -143,7 +144,7 @@ git 版本都原样输出，后者避免 `git status` 去执行被扫仓库自�
 
 ## 它抓不到什么
 
-- 图片、PDF 与其他二进制文件里的文本与 EXIF —— 不解析。
+- 图片、PDF 与其他二进制文件里的文本与 EXIF —— 不解析。Git LFS 的文件只扫到指标，会明确报成「内容没被读到」，不会假装干净。
 - 运行时才组装出来的数据（从数据库、API 读进来）。
 - 你没列进条款清单的名字。工具不知道谁是谁。
 - 语义：一句话描述你，却不含任何可比对的字符串。
@@ -154,7 +155,7 @@ git 版本都原样输出，后者避免 `git status` 去执行被扫仓库自�
 `--selftest` 为每个类别造一个合成 canary，漏抓任何一个就失败：
 
 ```bash
-python scripts/privacy_scan.py --selftest    # selftest: 23/23 passed
+python scripts/privacy_scan.py --selftest    # selftest: 26/26 passed
 ```
 
 `verify_gate.sh` 建一个临时仓库、commit 一个假凭证，并要求 commit 是**因为扫描器报出来**才被拦 ——

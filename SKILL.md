@@ -1,6 +1,6 @@
 ---
 name: privacy-preflight
-version: 1.3.2
+version: 1.4.0
 description: "Use before pushing a repo public: block personal leaks."
 license: MIT
 ---
@@ -36,6 +36,7 @@ bash   <skill>/scripts/verify_gate.sh                    # 端到端證明：洩
 1. **工具本身不含任何要檢查的資料。** 姓名、學校、公司、帳號、專案代號一律從 repo **外**的條款清單讀取。會把要查的字寫進自己的檢查器，本身就是洩漏。
 2. **憑證掃描器不是隱私檢查。** gitleaks / trufflehog 找的是金鑰，找不到你的名字。兩套都要跑，誰都不能取代誰。
 3. **關卡在 push，不在 commit。** rebase、改寫歷史、重加 remote 都會把 commit hook 沒看過的歷史帶回來。
+4. **每次 commit 前先自己掃一次，不要直接 commit（使用者的常規）。** 這條是行為約定，不是 hook 的功能說明：hook 是備援，先跑一次 `privacy_scan.py --repo . --require-terms` 再 `git commit`。掃描輸出貼在回覆裡，讓使用者看到這次 commit 是掃過才進去的。
 
 ## 條款清單（唯一需要你自己準備的東西）
 
@@ -72,6 +73,7 @@ bash   <skill>/scripts/verify_gate.sh                    # 端到端證明：洩
 | commit-message | 每顆 commit 的訊息本文（最常被拿去寫真名或工單網址） |
 | remotes | `.git/config` 裡帶帳密的 remote URL（檔案掃描看不到） |
 | untracked-file | 沒被 ignore 的敏感檔（下一次 `git add .` 就會進去） |
+| unreachable | 沒有任何 ref 指到的物件（amend 掉的舊 commit、rebase 掉的分支）；加 `--dangling` 才掃，push 不會送出它們 |
 
 掃描範圍：索引（也就是你真正會 commit 的內容）、`--all` 可達的每一個 blob（含已被刪除的檔案）、commit 身分、commit 訊息、`.git/config` 的 remote、untracked 檔。被刪掉的檔案仍會被報出來，因為刪除也是一顆 commit。
 
@@ -129,7 +131,10 @@ git config --global --add privacy.ignore 'tests/fixtures/.*canary'  # 你確認�
 **缺條款清單就當場停手。** hook 一律帶 `--require-terms`：沒有清單時退出碼 2，而不是印個警告就說 clean。
 
 **二進位與編碼。** UTF-16（Windows PowerShell 輸出、`.reg`）會先解碼再掃，不再因為 NUL 位元組被當成
-二進位跳過。掃描時所有 git 呼叫都帶 `-c core.quotePath=false -c core.fsmonitor=false`：前者讓非 ASCII
+二進位跳過。**UTF-8 以外的舊中文編碼（Big5／CP950）也要處理**：非 UTF-8 位元組依 `errors="replace"` 解成
+亂碼後，條款字永遠比對不到，整個檔案等於沒掃（實測：CP950 存的中文檔寫著真名，掃描回報 clean）。做法是
+UTF-8 解不開就依序試 `cp950` / `big5` / `cp1252`，用第一個解得開的重編成 UTF-8 再掃，並補一條 canary。
+掃描時所有 git 呼叫都帶 `-c core.quotePath=false -c core.fsmonitor=false`：前者讓非 ASCII
 檔名在任何 git 版本都原樣輸出，後者避免 `git status` 執行被掃 repo 自己 `.git/config` 指名的程式。
 
 ## 讀輸出
@@ -148,7 +153,7 @@ git config --global --add privacy.ignore 'tests/fixtures/.*canary'  # 你確認�
 綠燈只有在看過紅燈之後才有意義。
 
 ```bash
-python <skill>/scripts/privacy_scan.py --selftest    # 23 個合成 canary，全部是假資料
+python <skill>/scripts/privacy_scan.py --selftest    # 26 個合成 canary，全部是假資料
 bash   <skill>/scripts/verify_gate.sh                # 真的 commit 與 push 一次，確認被擋
 python tests/canary_battery.py                       # 每類種一個 canary，種在臨時副本裡
 python tests/terms_guard.py                          # 這個 repo 不含清單上的任何一個字
@@ -160,7 +165,7 @@ python tests/terms_guard.py                          # 這個 repo 不含清單�
 
 ## 發布順序
 
-1. `git status` 乾淨、`privacy_scan.py --repo .` 退出碼 0。
+1. `git status` 乾淨、`privacy_scan.py --repo . --dangling` 退出碼 0（`--dangling` 也掃 amend／rebase 掉、沒有任何 ref 指到的舊物件 —— 那些 push 不會送出，但還躺在 `.git` 裡）。
 2. 先推到 **private** repo，在 GitHub 的檔案清單裡用陌生人的眼睛看一遍路徑。
 3. 再改 public。改完用匿名請求確認 `raw.githubusercontent.com` 讀得到（private 會讓 catalog 與安裝流程無聲失敗）。
 4. 最後跑一次「陌生人的環境」：`git clone <public-url>` 到臨時目錄，在那份副本上跑掃描器與專案自己的測試。本機的 `privacy.allow`、`--ignore`、`--term` 都不會被 push，靠它們豁免的東西只有這一步會現形。
@@ -230,6 +235,7 @@ python scripts/llm_review_context.py --repo .
 - 執行時才組出來的資料（從資料庫、API 讀進來）——那是程式的行為，不是檔案內容。
 - 你沒列進條款清單的名字。工具不知道誰是誰。
 - 語意：一句話描述你的住址而不含任何可比對的字串 → 交給第二層 LLM 審查（見上一節），不是放著不管。
+- 沒有任何 ref 指到的物件（amend 掉的舊 commit、rebase 掉的分支）：只有加 `--dangling` 才掃；push 不會送出它們。
 - **已經在 GitHub 上的東西**：本機掃描器看不到遠端歷史。那是 `references/leak-recovery.md` 的事。
 
 ## 維護這個工具本身
@@ -253,6 +259,9 @@ python scripts/llm_review_context.py --repo .
 - **驗證安裝器不要動真的全域設定。** `HOME` 與 `GIT_CONFIG_GLOBAL` 一起指到沙箱，兩者都要 native
   路徑。`git config --global` 讀 `GIT_CONFIG_GLOBAL`，而 python 的 `~` 走 `USERPROFILE`、
   不受 `HOME` 影響 —— 兩者不一致時，你會以為改了、其實掃的是真設定。
+  **`export` 會延續到之後的每一個 terminal 呼叫**（同一個 shell session 保存環境變數），所以在沙箱裡
+  `export HOME=…` 之後，下一次掃描會安靜地讀沙箱裡的空設定 —— 症狀是 terms 突然「找不到」、同一份
+  repo 的結果跟剛剛相反。要嘛在同一個呼叫裡改回來，要嘛用 `env HOME=… python …` 只作用於那一條指令。
 - **量退出碼時不要把輸出接管線。** `bash verify.sh | tail -5` 之後的 `$?` 是 `tail` 的；
   寫成 `bash verify.sh > out 2>&1; echo $?`，否則「通過」是自己製造的。
 - **第一次掃描的三類誤報分開處理，不要放寬規則。** 偵測器檔案 → `--allow`；測試裡的假金鑰 →
@@ -273,6 +282,12 @@ python scripts/llm_review_context.py --repo .
   最常見的失敗不是譯錯而是漏譯一整列（少一個偵測類別），讀那個語言的人就會誤判覆蓋範圍。
   用一個小腳本比對各語言版本的類別名、旗標與結果數字，並**實際刪掉一列確認它會 exit 1**。
   範例輸出裡不要寫「10 tracked file(s)」這種隨檔案數變動的數字，否則每加一個檔案文件就過期一次。
+
+- **未預期的例外必須映射成退出碼 2，不能讓它變成 1。** 掃描器丟 traceback 時 Python 預設退出碼是 1，
+  跟「掃到問題」完全無法區分：hook 會擋（看起來對），但人會讀成有 finding，`--report` 也不會寫出來。
+  在入口把 `main()` 包起來：`SystemExit` 原樣重拋、`KeyboardInterrupt` 給 130、其他例外印類別與訊息後
+  回 2，並在訊息裡寫「掃描沒跑完，不要當成乾淨」。順手把會炸的讀取（`.gitignore` 可能是目錄、symlink、
+  超大檔）改成 note，崩潰與判斷分開。
 
 ## 參考
 

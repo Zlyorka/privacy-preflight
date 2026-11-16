@@ -78,6 +78,7 @@ their case an empty list is exit 2.
 | commit-message | the message body of every commit (the usual home of real names and ticket URLs) |
 | remotes | a remote URL in `.git/config` that carries a password (a file scan cannot see it) |
 | untracked-file | a sensitive file that is not ignored, so the next `git add .` takes it |
+| unreachable | objects no ref points at (an amended commit, a rebased branch); scanned only with `--dangling`, and a push never sends them |
 
 Scope: the index (what you will actually commit), every blob reachable from `--all` (including
 deleted files), commit identities, commit messages, the remote in `.git/config`, untracked files.
@@ -197,7 +198,7 @@ machine-readable report.
 A green light means nothing until the red one has been seen.
 
 ```bash
-python <skill>/scripts/privacy_scan.py --selftest    # 23 synthetic canaries, all fake
+python <skill>/scripts/privacy_scan.py --selftest    # 26 synthetic canaries, all fake
 bash   <skill>/scripts/verify_gate.sh                # a real commit and push, and both are blocked
 ```
 

@@ -17,11 +17,11 @@ ROOT = Path(__file__).resolve().parent.parent
 CATEGORIES = [
     "credential", "sensitive-file", "machine-path", "email", "ip-address", "phone",
     "national-id", "identity-term", "commit-identity", "commit-message", "remotes",
-    "untracked-file",
+    "untracked-file", "unreachable",
 ]
-FLAGS = ["--require-terms", "--trust-repo-config", "--report", "--selftest"]
+FLAGS = ["--require-terms", "--trust-repo-config", "--report", "--selftest", "--dangling"]
 TOKENS = ["llm_review_context.py", "references/llm-review.md"]  # the second layer must be documented
-NUMBERS = ["23", "11/11", "8 passed"]
+NUMBERS = ["26", "11/11", "8 passed"]
 
 DOCS = ["README.md", "README.zh-TW.md", "README.zh-CN.md"]
 SPECS = ["SKILL.md", "docs/SKILL.en.md", "docs/SKILL.zh-CN.md"]

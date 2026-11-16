@@ -23,7 +23,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-VERSION = "1.3.2"
+VERSION = "1.4.0"
 
 # ---------------------------------------------------------------- detection patterns
 
@@ -191,6 +191,13 @@ def term_hits(text_lower: bytes, terms: list[bytes]) -> list[bytes]:
 
 # ---------------------------------------------------------------- content scan
 
+LFS_POINTER = re.compile(rb"^version https://git-lfs\.github\.com/spec/v1\s*$", re.MULTILINE)
+
+
+def is_lfs_pointer(data: bytes) -> bool:
+    return bool(LFS_POINTER.search(data[:400]))
+
+
 def to_utf8(data: bytes) -> bytes:
     """Legacy Chinese text (Big5/CP950) is not UTF-8, and decoded as UTF-8 it becomes mojibake no
     term can match — a repository full of old `.txt` files scanned clean. Try the encodings a
@@ -218,6 +225,12 @@ def scan_content(data: bytes, where: str, terms: list[bytes], findings: list[dic
         except (UnicodeDecodeError, LookupError):
             return
     if is_binary(data):
+        return
+    if is_lfs_pointer(data):
+        # The blob is a pointer; the bytes a user actually sees live in LFS storage and are never
+        # read here. Saying "clean" for such a file would be a false reassurance.
+        add(findings, "sensitive-file", where,
+            "Git LFS pointer: the real content is not in the repository and was not scanned")
         return
     data = to_utf8(data)
     seen: set[tuple[int, str]] = set()
@@ -421,6 +434,43 @@ def scan_history(repo: Path, terms: list[bytes], findings: list[dict], allow: se
     return len(blobs), truncated
 
 
+def scan_unreachable(repo: Path, terms: list[bytes], findings: list[dict], allow: set[str],
+                     data_dirs: list[str], max_objects: int) -> tuple[int, bool]:
+    """Objects no ref points at: an amended commit, a rebased branch, `git add` then reset.
+
+    They are never pushed, so this is a local-only risk — but they sit in .git and a later
+    `git push --mirror`, a reflog rescue or a careless `git gc` decision can still surface them.
+    Off by default; the pre-public checklist turns it on.
+    """
+    reachable: set[str] = set()
+    for line in git(repo, "rev-list", "--objects", "--all").splitlines():
+        sha, _, _path = line.partition(b" ")
+        reachable.add(sha.decode())
+    listing = git(repo, "cat-file", "--batch-all-objects",
+                  "--batch-check=%(objectname) %(objecttype) %(objectsize)")
+    unreachable: list[tuple[str, int]] = []
+    for line in listing.decode("utf-8", "replace").splitlines():
+        parts = line.split()
+        if len(parts) != 3 or parts[1] != "blob":
+            continue
+        sha = parts[0]
+        if sha in reachable:
+            continue
+        size = int(parts[2])
+        if size <= LARGE_BLOB_BYTES:
+            unreachable.append((sha, size))
+    truncated = len(unreachable) > max_objects
+    if truncated:
+        print(f"warning: {len(unreachable)} unreachable blob(s) exceed --max-objects {max_objects}; "
+              f"the dangling scan is partial", file=sys.stderr)
+    batch = [sha for sha, _size in sorted(unreachable)[:max_objects]]
+    contents = batch_blobs(repo, batch)
+    for sha, data in contents.items():
+        where = f"unreachable: {sha[:12]}"
+        scan_content(data, where, terms, findings, skip_paths=False)
+    return len(contents), truncated
+
+
 def scan_identities(repo: Path, terms: list[bytes], findings: list[dict]) -> int:
     out = git(repo, "log", "--all", "--format=%an%x1f%ae%x1f%cn%x1f%ce")
     pairs: set[tuple[str, str]] = set()
@@ -508,6 +558,19 @@ def scan_tags(repo: Path, terms: list[bytes], findings: list[dict]) -> int:
         if message.strip():
             scan_content(message.encode(), f"tag-message: {name}", terms, findings)
     return count
+
+
+def check_lfs(repo: Path, notes: list[str]) -> None:
+    attributes = repo / ".gitattributes"
+    if not attributes.is_file() or attributes.is_symlink():
+        return
+    try:
+        text = attributes.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return
+    if "filter=lfs" in text:
+        notes.append("this repository uses Git LFS: pointer files are reported, their real content is "
+                     "never read by this scanner")
 
 
 def scan_untracked(repo: Path, findings: list[dict]) -> int:
@@ -715,6 +778,31 @@ def selftest() -> int:
                proc.returncode == 1 and "certs/dist.pem" in proc.stdout, proc)
         expect(".env.dist is treated as a template", ".env.dist" not in proc.stdout, proc)
 
+        lfs = make_repo(base / "lfs")
+        (base / "lfs" / "asset.bin").write_text(
+            "version https://git-lfs.github.com/spec/"
+            "v1\noid sha256:" + "0" * 64 + "\nsize 12345\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=str(lfs), capture_output=True, check=True)
+        commit(lfs, "init")
+        proc = run("--repo", str(lfs))
+        expect("a Git LFS pointer is reported, not silently trusted",
+               proc.returncode == 1 and "Git LFS pointer" in proc.stdout, proc)
+
+        dangling = make_repo(base / "dangling")
+        write(dangling, "cfg.py", f'KEY = "{fake_key}"\n')
+        subprocess.run(["git", "add", "-A"], cwd=str(dangling), capture_output=True, check=True)
+        commit(dangling, "leaky")
+        write(dangling, "cfg.py", "KEY = None\n")
+        subprocess.run(["git", "add", "-A"], cwd=str(dangling), capture_output=True, check=True)
+        subprocess.run(["git", "-c", "user.name=canary", "-c", "user.email=dev@localhost",
+                        "commit", "-q", "--amend", "--no-edit"], cwd=str(dangling),
+                       capture_output=True, check=True)
+        proc = run("--repo", str(dangling))
+        expect("an amended-away blob is not part of a normal scan", proc.returncode == 0, proc)
+        proc = run("--repo", str(dangling), "--dangling")
+        expect("--dangling finds the amended-away blob",
+               proc.returncode == 1 and "unreachable" in proc.stdout, proc)
+
         legacy = make_repo(base / "legacy")
         (base / "legacy" / "about.txt").write_bytes(
             f"作者：{fake_term}\n".encode("cp950"))
@@ -868,6 +956,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="also read privacy.allow / privacy.ignore / privacy.dataDirs from the "
                              "scanned repository's own .git/config; a hostile repository can use "
                              "that to silence itself, so it is off by default")
+    parser.add_argument("--dangling", action="store_true",
+                        help="also scan objects no ref points at (amended commits, rebased branches); "
+                             "never pushed, but still in .git — use it before flipping to public")
     parser.add_argument("--require-terms", action="store_true",
                         help="exit 2 when no terms list is available; the hooks use this so a "
                              "missing list cannot silently downgrade the gate")
@@ -942,9 +1033,15 @@ def main(argv: list[str] | None = None) -> int:
         stats["identities"] = scan_identities(repo, terms, findings)
         stats["tags"] = scan_tags(repo, terms, findings)
         stats["messages"] = scan_commit_messages(repo, terms, findings, allow)
+        if args.dangling:
+            stats["unreachable"], dangling_truncated = scan_unreachable(
+                repo, terms, findings, allow, data_dirs, args.max_objects)
+            if dangling_truncated:
+                notes.append("the dangling scan stopped at --max-objects: results are partial")
         stats["remotes"] = scan_remote_urls(repo, findings)
         stats["untracked"] = scan_untracked(repo, findings)
         check_gitignore(repo, notes)
+        check_lfs(repo, notes)
 
     if args.ignore:
         try:

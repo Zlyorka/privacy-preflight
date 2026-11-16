@@ -25,7 +25,7 @@ from pathlib import Path
 
 # Cues that a line is worth a human or model reading. Deliberately broad: this pass is not a gate,
 # it decides what to put in front of the reviewer, and the reviewer decides what matters.
-CUES = [
+CUES_RAW = [
     ("self", r"我|我的|我們|本人|\bI\b|\bmy\b|\bme\b|\bwe\b|\bour\b"),
     ("place", r"住|地址|戶籍|新北|台北|臺北|桃園|台中|臺中|台南|臺南|高雄|板橋|中和|新莊|淡水"),
     ("school", r"大學|學院|研究所|高中|高職|國中|科大|系所|畢業|學號|指導教授"),
@@ -35,7 +35,9 @@ CUES = [
     ("loose", r"TODO|FIXME|XXX|暫時|先這樣|測試用|假設|示意|範例資料|real data|actual"),
     ("ticket", r"工單|ticket|issue\s*#|JIRA|#\d{3,}|會議|meeting|訪談"),
 ]
-CUES = [(name, re.compile(pattern, re.IGNORECASE)) for name, pattern in CUES]
+CUES: list[tuple[str, re.Pattern[str]]] = [
+    (name, re.compile(pattern, re.IGNORECASE)) for name, pattern in CUES_RAW
+]
 TEXT_EXT = {
     ".md", ".txt", ".py", ".js", ".ts", ".tsx", ".jsx", ".json", ".ya?ml", ".yml", ".toml", ".ini",
     ".cfg", ".sh", ".bash", ".ps1", ".sql", ".csv", ".html", ".css", ".java", ".go", ".rs", ".rb",
@@ -120,50 +122,83 @@ def main() -> int:
     records.sort(key=lambda record: (-record["score"], record["name"]))
     chosen = [record for record in records if record["score"] > 0][:args.top]
 
-    out: list[str] = []
-    out.append("# Review packet\n")
-    out.append(f"Repository: `{repo.name}` · {len(names)} tracked file(s) · "
-               f"{len(records)} text file(s) · {len(chosen)} selected\n")
-    out.append("## What this pass is for\n")
-    out.append("The scanner already proved there are no credentials, machine paths, addresses or listed\n"
-               "terms. Read the excerpts below for **meaning**: a place, a school, an employer, a client,\n"
-               "a schedule, a person, a story that identifies the author without any literal a rule could\n"
-               "match. Report only what you can cite by `path:line`.\n")
-    out.append("## Selected files\n")
-    out.append("| File | Bytes | Cues |\n|---|---|---|\n")
+    head: list[str] = ["# Review packet\n"]
+    head.append(f"Repository: `{repo.name}` · {len(names)} tracked file(s) · "
+                f"{len(records)} text file(s) · {len(chosen)} selected\n")
+    head.append("## What this pass is for\n")
+    head.append("The scanner already proved there are no credentials, machine paths, addresses or listed\n"
+                "terms. Read the excerpts below for **meaning**: a place, a school, an employer, a client,\n"
+                "a schedule, a person, a story that identifies the author without any literal a rule could\n"
+                "match. Report only what you can cite by `path:line`.\n")
+    head.append("## Selected files\n")
+    head.append("| File | Bytes | Cues |\n|---|---|---|\n")
     for record in chosen:
         cues = ", ".join(f"{cue}×{count}" for cue, count in sorted(record["hits"].items())) or "size/path"
-        out.append(f"| `{record['name']}` | {record['size']} | {cues} |\n")
-    out.append("\n## Excerpts\n")
-    for record in chosen:
-        out.append(f"\n### `{record['name']}`\n")
-        if record["size"] < SMALL_FILE:
-            body = [f"{number + 1:>5}| {line}"
-                    for number, line in enumerate(record["lines"])]
-            block = "\n".join(body)
-            if len(block) > args.budget // 6:
-                block = block[:args.budget // 6] + "\n   … file cut at the packet budget …"
-            out.append("```\n" + block + "\n```\n")
-        else:
-            shown = set()
-            for cue, pattern in CUES:
-                for number, line in enumerate(record["lines"]):
-                    if pattern.search(line):
-                        start = max(0, number - 2)
-                        if start in shown:
-                            continue
-                        shown.add(start)
-                        out.append("```\n" + "\n".join(excerpt(record["lines"], number)) + "\n```\n")
-    out.append("\n## Report format\n")
-    out.append("```\n== review: <category>\n  <path>:<line>  <quote, up to 120 chars>\n"
-               "  why: <what a stranger learns>\n  fix: <what to change>\n== summary\n"
-               "  <n> finding(s) — <verdict>\n```\n")
+        head.append(f"| `{record['name']}` | {record['size']} | {cues} |\n")
+    tail = ["\n## Report format\n",
+            "```\n== review: <category>\n  <path>:<line>  <quote, up to 120 chars>\n"
+            "  why: <what a stranger learns>\n  fix: <what to change>\n== summary\n"
+            "  <n> finding(s) — <verdict>\n```\n"]
 
-    packet = "".join(out)
-    encoded = packet.encode("utf-8")
-    if len(encoded) > args.budget:
-        packet = encoded[:args.budget].decode("utf-8", "ignore") + \
-                 "\n\n… packet truncated at the budget; raise --budget to see the rest …\n"
+    # The report format is what makes the excerpts usable, so it is reserved before any excerpt gets
+    # a byte. Cutting the assembled string at the end dropped it on any repository that filled the
+    # budget — the reviewer then had examples but no instructions.
+    fixed = len("".join(head + tail).encode("utf-8"))
+    if fixed > args.budget:
+        print(f"warning: the header and the report format alone need {fixed} bytes, more than the "
+              f"{args.budget}-byte budget; no excerpt will fit", file=sys.stderr)
+    remaining = max(0, args.budget - fixed)
+    per_file = max(1_500, remaining // max(1, len(chosen)))
+
+    blocks: list[str] = []
+    skipped: list[str] = []
+    for record in chosen:
+        allowance = min(per_file, max(0, remaining))
+        if allowance < 400:
+            skipped.append(record["name"])
+            continue
+        if record["size"] < SMALL_FILE:
+            body = "\n".join(f"{number + 1:>5}| {line}"
+                             for number, line in enumerate(record["lines"]))
+            if len(body) > allowance:
+                cut = body[:allowance].rsplit("\n", 1)[0]
+                body = cut + "\n   … rest of this file omitted at the packet budget …"
+            block = f"\n### `{record['name']}`\n```\n{body}\n```\n"
+        else:
+            parts: list[str] = []
+            shown: set[int] = set()
+            used = 0
+            for _cue, pattern in CUES:
+                for number, line in enumerate(record["lines"]):
+                    if not pattern.search(line):
+                        continue
+                    start = max(0, number - 2)
+                    if start in shown:
+                        continue
+                    piece = "\n".join(excerpt(record["lines"], number))
+                    if used + len(piece) > allowance:
+                        break
+                    shown.add(start)
+                    parts.append(f"```\n{piece}\n```\n")
+                    used += len(piece)
+                if used >= allowance:
+                    break
+            if not parts:
+                skipped.append(record["name"])
+                continue
+            block = f"\n### `{record['name']}`\n" + "".join(parts)
+        blocks.append(block)
+        remaining -= len(block.encode("utf-8"))
+
+    if skipped:
+        head.append(f"\n> {len(skipped)} selected file(s) did not fit the "
+                    f"{args.budget}-byte budget and were not quoted: "
+                    + ", ".join(f"`{name}`" for name in skipped)
+                    + ". Raise `--budget` or use `--top` to narrow the selection.\n")
+        print(f"warning: {len(skipped)} selected file(s) omitted at the budget: "
+              + ", ".join(skipped), file=sys.stderr)
+
+    packet = "".join(head) + "\n## Excerpts\n" + "".join(blocks) + "".join(tail)
     if args.out:
         target: Path | None = Path(os.path.expanduser(args.out))
     else:

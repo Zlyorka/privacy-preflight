@@ -23,7 +23,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 
 # ---------------------------------------------------------------- detection patterns
 

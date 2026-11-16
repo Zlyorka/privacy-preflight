@@ -1,6 +1,6 @@
 ---
 name: privacy-preflight
-version: 1.3.0
+version: 1.3.1
 description: "Use before pushing a repo public: block personal leaks."
 license: MIT
 ---

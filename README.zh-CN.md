@@ -176,7 +176,7 @@ bash scripts/verify_gate.sh                  # 8 passed, 0 failed
 再移除。它不会动到你的索引：
 
 ```bash
-python tests/canary_battery.py               # battery: 11/11
+python tests/canary_battery.py               # battery: 15/15
 ```
 
 `tests/terms_guard.py` 证明另一半 —— 这个仓库不含你任何一个识别词。它从仓库外读条款清单，

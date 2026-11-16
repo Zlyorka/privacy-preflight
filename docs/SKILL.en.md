@@ -205,7 +205,7 @@ bash   <skill>/scripts/verify_gate.sh                # a real commit and push, a
 The five tests print, on this machine:
 
 ```
-selftest: 27/27 passed          canary_battery: 11/11
+selftest: 27/27 passed          canary_battery: 15/15
 terms_guard: 0 offending         docs_sync: 6 file(s) consistent
 llm_packet: 5/5 properties hold  verify_gate: 8 passed, 0 failed
 ```

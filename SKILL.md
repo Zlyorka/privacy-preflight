@@ -170,7 +170,7 @@ python tests/terms_guard.py                          # 這個 repo 不含清單�
 五支測試目前的輸出（本機實測，換機器可能因資料量不同）：
 
 ```
-selftest: 27/27 passed          canary_battery: 11/11
+selftest: 27/27 passed          canary_battery: 15/15
 terms_guard: 0 offending         docs_sync: 6 file(s) consistent
 llm_packet: 5/5 properties hold  verify_gate: 8 passed, 0 failed
 ```

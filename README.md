@@ -189,7 +189,7 @@ bash scripts/verify_gate.sh                  # 8 passed, 0 failed
 requires the scanner to report each one, then removes it again. It never touches your index:
 
 ```bash
-python tests/canary_battery.py               # battery: 11/11
+python tests/canary_battery.py               # battery: 15/15
 ```
 
 `tests/terms_guard.py` proves the other half — that this repository carries none of your own

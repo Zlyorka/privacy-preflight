@@ -176,7 +176,7 @@ bash scripts/verify_gate.sh                  # 8 passed, 0 failed
 再移除。它不會動到你的索引：
 
 ```bash
-python tests/canary_battery.py               # battery: 11/11
+python tests/canary_battery.py               # battery: 15/15
 ```
 
 `tests/terms_guard.py` 證明另一半 —— 這個 repo 不含你任何一個識別字。它從 repo 外讀條款清單，

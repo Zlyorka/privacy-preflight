@@ -182,7 +182,7 @@ bash   <skill>/scripts/verify_gate.sh                # 真的 commit 与 push �
 五支测试目前的输出（本机实测，换机器可能因数据量不同）：
 
 ```
-selftest: 27/27 passed          canary_battery: 11/11
+selftest: 27/27 passed          canary_battery: 15/15
 terms_guard: 0 offending         docs_sync: 6 file(s) consistent
 llm_packet: 5/5 properties hold  verify_gate: 8 passed, 0 failed
 ```

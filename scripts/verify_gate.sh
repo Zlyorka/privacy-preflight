@@ -13,7 +13,6 @@ set -uo pipefail
 skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 scanner="$skill_dir/scripts/privacy_scan.py"
 HOOK_DIR="${PRIVACY_PREFLIGHT_HOME:-$HOME/.privacy-preflight}/hooks"
-[ -d "$HOOK_DIR" ] || HOOK_DIR="$HOME/.hermes/privacy-hooks"   # legacy install still counts
 pass=0
 fail=0
 
@@ -21,6 +20,16 @@ fail=0
 to_native() {
   if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s\n' "$1"; fi
 }
+
+# A fresh install has no terms list yet, and the hooks refuse to run without one. Give this run a
+# throwaway list so the proof measures the gate rather than a half-finished installation.
+if [ -z "${PRIVACY_TERMS_FILE:-}" ] && [ ! -f "$HOME/.config/privacy-preflight/terms.txt" ] \
+   && [ ! -f "$HOME/.privacy-preflight/terms.txt" ]; then
+  terms_probe="$(mktemp "${TMPDIR:-/tmp}/privacy-terms-XXXXXX")"
+  printf 'verifyprobe%s\n' "identifier" > "$terms_probe"
+  export PRIVACY_TERMS_FILE="$(to_native "$terms_probe")"
+  printf '  note  no terms list on this machine: this run uses a throwaway one\n'
+fi
 
 scan_py="$(to_native "$scanner")"
 hook_dir_native="$(to_native "$HOOK_DIR")"

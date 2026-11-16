@@ -12,14 +12,6 @@ set -uo pipefail
 # Neutral by default: no agent runtime owns the gate. PRIVACY_PREFLIGHT_HOME overrides it.
 PRIVACY_HOME="${PRIVACY_PREFLIGHT_HOME:-$HOME/.privacy-preflight}"
 HOOK_DIR="$PRIVACY_HOME/hooks"
-LEGACY_HOOK_DIR="$HOME/.hermes/privacy-hooks"
-# An install made before the paths were portable keeps working: move it, do not orphan it.
-if [ ! -d "$HOOK_DIR" ] && [ -d "$LEGACY_HOOK_DIR" ]; then
-  mkdir -p "$(dirname "$HOOK_DIR")"
-  if mv "$LEGACY_HOOK_DIR" "$HOOK_DIR" 2>/dev/null; then
-    printf 'migrated %s -> %s\n' "$LEGACY_HOOK_DIR" "$HOOK_DIR"
-  fi
-fi
 STATE="$HOOK_DIR/previous-hooks-path"
 POINTER="$HOOK_DIR/scanner"
 skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -150,9 +142,15 @@ printf 'scanner        = %s\n' "$scanner"
 terms="$(python3 -c 'import os
 from pathlib import Path
 for c in (os.environ.get("PRIVACY_TERMS_FILE"), "~/.config/privacy-preflight/terms.txt",
-          "~/.privacy-preflight/terms.txt", "~/.hermes/privacy-terms.txt",
-          "~/.hermes/prepublish-terms.txt"):
+          "~/.privacy-preflight/terms.txt"):
     if c and Path(os.path.expanduser(c)).is_file():
         print(os.path.expanduser(c)); break' 2>/dev/null || true)"
-printf 'terms list     = %s\n' "${terms:-NONE — create ~/.config/privacy-preflight/terms.txt before trusting a clean run}"
+printf 'terms list     = %s\n' "${terms:-NONE}"
+if [ -z "$terms" ]; then
+  printf '\n  The gate is closed until that file exists: every commit and push is refused with exit 2,\n'
+  printf '  because a scan without a terms list cannot prove there is no name in the repository.\n'
+  printf '  Create it, then run this installer again (or just commit — the check runs every time):\n'
+  printf '    mkdir -p ~/.config/privacy-preflight\n'
+  printf '    printf "%%s\\n" "<your real name>" "<your handle>" > ~/.config/privacy-preflight/terms.txt\n'
+fi
 printf '\nNothing was added to any project. Prove the gate works: bash scripts/verify_gate.sh\n'

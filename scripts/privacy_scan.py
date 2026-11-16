@@ -144,13 +144,11 @@ def resolve_terms_file(explicit: str | None) -> Path | None:
             print(f"error: terms file not found: {path}", file=sys.stderr)
             raise SystemExit(2)
         return path
-    # Neutral locations first, so the tool belongs to no single agent runtime. The last two are
-    # legacy homes kept working for installs made before the paths were made portable.
+    # Neutral locations only: no agent runtime owns the tool, and nothing is looked up under a
+    # vendor directory.
     candidates = [os.environ.get("PRIVACY_TERMS_FILE"),
                   "~/.config/privacy-preflight/terms.txt",
-                  "~/.privacy-preflight/terms.txt",
-                  "~/.hermes/privacy-terms.txt",
-                  "~/.hermes/prepublish-terms.txt"]
+                  "~/.privacy-preflight/terms.txt"]
     for candidate in candidates:
         if candidate:
             path = Path(os.path.expanduser(candidate))

@@ -50,8 +50,8 @@ bash   <skill>/scripts/verify_gate.sh                    # 端到端證明：洩
 ```
 
 解析順序：`--terms-file` → `$PRIVACY_TERMS_FILE` → `~/.config/privacy-preflight/terms.txt` →
-`~/.privacy-preflight/terms.txt` → `~/.hermes/privacy-terms.txt` → `~/.hermes/prepublish-terms.txt`
-（後兩個是舊安裝的相容路徑）。也可以用 `--term` 臨時加字，或 `PRIVACY_TERMS="a b"`。
+`~/.privacy-preflight/terms.txt`。也可以用 `--term` 臨時加字，或 `PRIVACY_TERMS="a b"`。
+沒有任何 vendor 目錄會被查詢 —— 工具不屬於任何 agent runtime。
 
 清單是空的，那一輪只證明沒有金鑰、路徑、email、IP，**不證明**沒有名字。工具會印警告，退出碼仍然是 0。
 

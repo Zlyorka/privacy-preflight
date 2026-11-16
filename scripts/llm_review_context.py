@@ -76,6 +76,12 @@ def score(name: str, size: int, hits: dict[str, int]) -> int:
     for cue, count in hits.items():
         value += {"self": 3, "place": 3, "employer": 3, "school": 2, "identity": 3,
                   "contact": 1, "loose": 1, "ticket": 1}[cue] * min(count, 3)
+    # Diversity beats repetition: a file that hits five different cues is more interesting than one
+    # that says "我" forty times, which is what a long document does.
+    if len(hits) > 2:
+        value += 2 * (len(hits) - 2)
+    # A very large file costs the packet a lot of budget for the same evidence.
+    value -= min(4, size // 40_000)
     return value
 
 
@@ -130,7 +136,20 @@ def main() -> int:
                         "score": score(name, len(data), hits)})
 
     records.sort(key=lambda record: (-record["score"], record["name"]))
-    chosen = [record for record in records if record["score"] > 0][:args.top]
+    ranked = [record for record in records if record["score"] > 0]
+    chosen = ranked[:args.top]
+
+    # Code is easy to score and hard to read for meaning; documents and fixtures are the opposite.
+    # Keep at least a third of the slots for non-code files, or a script-heavy repository crowds
+    # its own README out of the packet.
+    if chosen:
+        wanted_docs = max(1, len(chosen) // 3)
+        docs_now = sum(1 for record in chosen if Path(record["name"]).suffix.lower() not in CODE_EXT)
+        if docs_now < wanted_docs:
+            extra = [record for record in ranked
+                     if record not in chosen
+                     and Path(record["name"]).suffix.lower() not in CODE_EXT][:wanted_docs - docs_now]
+            chosen = sorted(chosen + extra, key=lambda record: (-record["score"], record["name"]))
 
     head: list[str] = ["# Review packet\n"]
     head.append(f"Repository: `{repo.name}` · {len(names)} tracked file(s) · "

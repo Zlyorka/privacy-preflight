@@ -58,7 +58,7 @@ GitHub 對 force-push 之後失效的 commit，仍可以用 SHA 讀到（`api.gi
 ## 7. 驗證，而不是宣稱
 
 ```bash
-python <skill>/scripts/privacy_scan.py --repo . --terms-file ~/.hermes/privacy-terms.txt
+python <skill>/scripts/privacy_scan.py --repo . --terms-file ~/.config/privacy-preflight/terms.txt
 python <skill>/scripts/privacy_scan.py --selftest
 ```
 

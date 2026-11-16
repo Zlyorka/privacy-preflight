@@ -22,7 +22,8 @@ Two design rules make it different from a secret scanner:
 
 ```bash
 # 1. the terms list — the one thing you supply, kept outside every repo
-cat > ~/.hermes/privacy-terms.txt <<'EOF'
+mkdir -p ~/.config/privacy-preflight
+cat > ~/.config/privacy-preflight/terms.txt <<'EOF'
 # one identifier per line; # starts a comment
 <your real name>
 <your handle or account name>
@@ -37,7 +38,27 @@ bash scripts/install_global_hook.sh
 bash scripts/verify_gate.sh
 ```
 
-`install_global_hook.sh` sets `core.hooksPath` to `~/.hermes/privacy-hooks` and points the hooks at
+### Any agent, or no agent at all
+
+`SKILL.md` follows the plain Agent Skills format (`name`, `description`, `license`) and holds no
+runtime-specific keys, so the same file loads in Claude Code, Codex, Antigravity, Cursor or any other
+agent that reads a `SKILL.md`. Copy the directory wherever that agent looks for skills:
+
+```bash
+git clone https://github.com/Zlyorka/privacy-preflight ~/.claude/skills/privacy-preflight
+```
+
+No agent at all is also supported — the scanner is one Python file with no dependencies:
+
+```bash
+git clone https://github.com/Zlyorka/privacy-preflight /tmp/pp
+python /tmp/pp/scripts/privacy_scan.py --repo .
+```
+
+State lives in `$PRIVACY_PREFLIGHT_HOME` (default `~/.privacy-preflight`) and in the global git
+config, so switching agents never means reinstalling the gate.
+
+`install_global_hook.sh` sets `core.hooksPath` to `~/.privacy-preflight/hooks` and points the hooks at
 this directory's scanner by absolute path. Existing per-repository hooks are chained, not shadowed.
 Use `--force` to take over a `core.hooksPath` that is already set, and `--uninstall` to restore it.
 

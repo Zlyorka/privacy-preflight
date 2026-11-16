@@ -19,7 +19,8 @@
 
 ```bash
 # 1. 條款清單 —— 唯一要你自己準備的東西，放在任何 repo 之外
-cat > ~/.hermes/privacy-terms.txt <<'EOF'
+mkdir -p ~/.config/privacy-preflight
+cat > ~/.config/privacy-preflight/terms.txt <<'EOF'
 # 一行一個，井號開頭是註解
 <你的真名>
 <你的帳號或英文名>
@@ -34,7 +35,27 @@ bash scripts/install_global_hook.sh
 bash scripts/verify_gate.sh
 ```
 
-`install_global_hook.sh` 把 `core.hooksPath` 指到 `~/.hermes/privacy-hooks`，並以絕對路徑指向
+### 任何 agent，或不裝 agent
+
+`SKILL.md` 用的是通用 Agent Skills 格式（`name`、`description`、`license`），不含任何 runtime 專屬欄位，
+所以同一份檔案在 Claude Code、Codex、Antigravity、Cursor 或任何讀 `SKILL.md` 的 agent 都能載入。
+把目錄複製到那個 agent 找 skill 的位置：
+
+```bash
+git clone https://github.com/Zlyorka/privacy-preflight ~/.claude/skills/privacy-preflight
+```
+
+完全不裝 agent 也可以 —— 掃描器就是一個沒有外部依賴的 Python 檔：
+
+```bash
+git clone https://github.com/Zlyorka/privacy-preflight /tmp/pp
+python /tmp/pp/scripts/privacy_scan.py --repo .
+```
+
+狀態放在 `$PRIVACY_PREFLIGHT_HOME`（預設 `~/.privacy-preflight`）與全域 git config，
+換 agent 不用重裝關卡。
+
+`install_global_hook.sh` 把 `core.hooksPath` 指到 `~/.privacy-preflight/hooks`，並以絕對路徑指向
 這個目錄的掃描器。各 repo 原本的 hook 會被串接執行，不會被蓋掉。既有的 `core.hooksPath` 要用
 `--force` 才能接管；`--uninstall` 還原原值。
 

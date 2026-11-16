@@ -1,22 +1,21 @@
 ---
 name: privacy-preflight
-version: 1.2.0
+version: 1.2.1
 description: "Use before pushing a repo public: block personal leaks."
-author: Hermes Agent
 license: MIT
-platforms: [windows, macos, linux]
-metadata:
-  hermes:
-    tags: [privacy, security, git, publishing, leak-prevention]
 ---
 
 # Privacy preflight
 
 推送任何 repo 到 GitHub 之前的隱私關卡。工具住在 skill 裡，不裝進專案；專案裡一個檔案都不會多。
 
+這份 SKILL.md 不綁任何 agent runtime：Claude Code、Codex、Antigravity、Hermes 讀的是同一份；
+也可以完全不裝 skill，直接 `git clone` 這個 repo 跑 `scripts/privacy_scan.py`。所有狀態都在
+`$PRIVACY_PREFLIGHT_HOME`（預設 `~/.privacy-preflight`）與全域 git config，換 agent 不用重裝。
+
 語言：本文件是繁體中文原文。English 版 `docs/SKILL.en.md`、中文版 `docs/SKILL.zh-CN.md`，README 也有三語（`README.md` / `README.zh-TW.md` / `README.zh-CN.md`）。
 
-需求邊界：這是機器層級的通用工具，不是每個專案貼一份腳本。任何要求把掃描檔放進專案的方案都不符合；一次安裝、所有 repo 生效，設定留在 `~/.hermes/` 與 git config。
+需求邊界：這是機器層級的通用工具，不是每個專案貼一份腳本。任何要求把掃描檔放進專案的方案都不符合；一次安裝、所有 repo 生效，設定留在 `~/.config/privacy-preflight/` 與 git config。
 
 ```bash
 python <skill>/scripts/privacy_scan.py --repo .          # 稽核：工作區、索引、每一顆 commit
@@ -42,7 +41,7 @@ bash   <skill>/scripts/verify_gate.sh                    # 端到端證明：洩
 放在 repo 外，一行一個，`#` 開頭是註解：
 
 ```
-# ~/.hermes/privacy-terms.txt
+# ~/.config/privacy-preflight/terms.txt
 <你的真名>
 <英文名或帳號>
 <學校 / 公司>
@@ -50,9 +49,9 @@ bash   <skill>/scripts/verify_gate.sh                    # 端到端證明：洩
 <常被寫進 fixture 的舊帳號>
 ```
 
-解析順序：`--terms-file` → `$PRIVACY_TERMS_FILE` → `~/.hermes/privacy-terms.txt` →
-`~/.hermes/prepublish-terms.txt` → `~/.config/privacy-preflight/terms.txt`。也可以用
-`--term` 臨時加字，或 `PRIVACY_TERMS="a b"`。
+解析順序：`--terms-file` → `$PRIVACY_TERMS_FILE` → `~/.config/privacy-preflight/terms.txt` →
+`~/.privacy-preflight/terms.txt` → `~/.hermes/privacy-terms.txt` → `~/.hermes/prepublish-terms.txt`
+（後兩個是舊安裝的相容路徑）。也可以用 `--term` 臨時加字，或 `PRIVACY_TERMS="a b"`。
 
 清單是空的，那一輪只證明沒有金鑰、路徑、email、IP，**不證明**沒有名字。工具會印警告，退出碼仍然是 0。
 
@@ -97,7 +96,7 @@ bash   <skill>/scripts/verify_gate.sh                    # 端到端證明：洩
 
 ## 一次安裝，管住所有 repo
 
-`install_global_hook.sh` 把 `core.hooksPath` 指向 `~/.hermes/privacy-hooks`，寫入兩個 hook：
+`install_global_hook.sh` 把 `core.hooksPath` 指向 `$PRIVACY_PREFLIGHT_HOME/hooks`（預設 `~/.privacy-preflight/hooks`），寫入兩個 hook：
 
 | hook | 時機 | 掃什麼 |
 |---|---|---|
@@ -115,12 +114,12 @@ bash   <skill>/scripts/verify_gate.sh                    # 端到端證明：洩
 不要為此在專案放設定檔：
 
 ```bash
-git config privacy.dataDirs cases,work,probe     # 這些目錄永不進 repo
-git config --add privacy.allow tests/test_hygiene.py   # 只跳過路徑樣式（偵測器本身）
-git config --add privacy.ignore 'tests/fixtures/.*canary'  # 你確認過是假資料的行
+git config --global privacy.dataDirs cases,work,probe     # 這些目錄永不進 repo
+git config --global --add privacy.allow tests/test_hygiene.py   # 只跳過路徑樣式（偵測器本身）
+git config --global --add privacy.ignore 'tests/fixtures/.*canary'  # 你確認過是假資料的行
 ```
 
-`--allow` 只跳過 machine-path；憑證、email、IP、條款字在那個檔案裡照樣檢查。`--ignore` 用在假金鑰、示範用的假 email，正則比對 `<位置> <內容>`。
+`--allow` 只跳過 machine-path；憑證、email、IP、條款字在那個檔案裡照樣檢查。`--ignore` 用在假金鑰、示範用的假 email，正則比對 `<類別> <位置> <內容>`。
 
 **遮蔽設定只從全域 git config 讀。** `privacy.allow`、`privacy.ignore`、`privacy.dataDirs` 預設取自
 `git config --global`；被掃 repo 自己的 `.git/config` 不採信 —— 否則惡意 repo 只要寫一行
@@ -148,11 +147,15 @@ git config --add privacy.ignore 'tests/fixtures/.*canary'  # 你確認過是假�
 綠燈只有在看過紅燈之後才有意義。
 
 ```bash
-python <skill>/scripts/privacy_scan.py --selftest    # 16 個合成 canary，全部是假資料
+python <skill>/scripts/privacy_scan.py --selftest    # 21 個合成 canary，全部是假資料
 bash   <skill>/scripts/verify_gate.sh                # 真的 commit 與 push 一次，確認被擋
+python tests/canary_battery.py                       # 每類種一個 canary，種在臨時副本裡
+python tests/terms_guard.py                          # 這個 repo 不含清單上的任何一個字
 ```
 
 `verify_gate.sh` 會建臨時 bare remote，實際跑 `git commit` 與 `git push`：洩漏的必須被拒，乾淨的必須通過。八步全過才算「這台機器上有關卡」。
+
+**驗證腳本要斷言診斷字串，不能只看退出碼。** `git commit`／`git push` 非零退出的原因很多 —— hook 自己崩掉、掃描器路徑不存在、Python 匯入失敗，只檢查退出碼的話這三種都會被算成「擋住了」。要求日誌裡出現掃描器自己的 `DO NOT PUBLISH`，才是證明關卡在工作。
 
 ## 發布順序
 
@@ -206,7 +209,13 @@ bash   <skill>/scripts/verify_gate.sh                # 真的 commit 與 push �
   每個 clone 一跑就回到 DO NOT PUBLISH。能在偵測器裡修掉的誤報（例如把 `<account>`、`<host>` 這種角括號佔位符
   排除）就修，不要用 allow 掩蓋；掩蓋過的豁免一定要再用匿名 clone 重驗一次。
 
+- **多語文件要有一個同步測試，範例輸出不要引用會變動的數量。** 三份 README 各自翻譯時，
+  最常見的失敗不是譯錯而是漏譯一整列（少一個偵測類別），讀那個語言的人就會誤判覆蓋範圍。
+  用一個小腳本比對各語言版本的類別名、旗標與結果數字，並**實際刪掉一列確認它會 exit 1**。
+  範例輸出裡不要寫「10 tracked file(s)」這種隨檔案數變動的數字，否則每加一個檔案文件就過期一次。
+
 ## 參考
 
 - `references/leak-recovery.md`：已經洩漏之後的處理順序。
+- `references/gate-review-checklist.md`：對抗式審查這類關卡時的題目清單 —— 誰能讓關卡閉嘴、哪些 git 指令會被被掃 repo 指定去執行程式、哪些編碼會讓整個檔案被靜靜跳過。
 - 相關 skill：`pre-public-repo-review`（發布流程與歷史改寫）、`secret-hygiene`（金鑰輪替）。

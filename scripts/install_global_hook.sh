@@ -5,11 +5,21 @@
 #   bash install_global_hook.sh --force    # take over an existing core.hooksPath
 #   bash install_global_hook.sh --uninstall
 #
-# Nothing is written into any project. The gate lives in $HOME/.hermes/privacy-hooks and points at
+# Nothing is written into any project. The gate lives in $HOME/.privacy-preflight/hooks and points at
 # this skill's scanner by absolute path, so there is one copy of the rules, not one per repository.
 set -uo pipefail
 
-HOOK_DIR="${PRIVACY_PREFLIGHT_HOME:-$HOME/.hermes/privacy-hooks}"
+# Neutral by default: no agent runtime owns the gate. PRIVACY_PREFLIGHT_HOME overrides it.
+PRIVACY_HOME="${PRIVACY_PREFLIGHT_HOME:-$HOME/.privacy-preflight}"
+HOOK_DIR="$PRIVACY_HOME/hooks"
+LEGACY_HOOK_DIR="$HOME/.hermes/privacy-hooks"
+# An install made before the paths were portable keeps working: move it, do not orphan it.
+if [ ! -d "$HOOK_DIR" ] && [ -d "$LEGACY_HOOK_DIR" ]; then
+  mkdir -p "$(dirname "$HOOK_DIR")"
+  if mv "$LEGACY_HOOK_DIR" "$HOOK_DIR" 2>/dev/null; then
+    printf 'migrated %s -> %s\n' "$LEGACY_HOOK_DIR" "$HOOK_DIR"
+  fi
+fi
 STATE="$HOOK_DIR/previous-hooks-path"
 POINTER="$HOOK_DIR/scanner"
 skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -139,9 +149,10 @@ printf 'core.hooksPath = %s\n' "$HOOK_DIR_NATIVE"
 printf 'scanner        = %s\n' "$scanner"
 terms="$(python3 -c 'import os
 from pathlib import Path
-for c in (os.environ.get("PRIVACY_TERMS_FILE"), "~/.hermes/privacy-terms.txt",
+for c in (os.environ.get("PRIVACY_TERMS_FILE"), "~/.config/privacy-preflight/terms.txt",
+          "~/.privacy-preflight/terms.txt", "~/.hermes/privacy-terms.txt",
           "~/.hermes/prepublish-terms.txt"):
     if c and Path(os.path.expanduser(c)).is_file():
         print(os.path.expanduser(c)); break' 2>/dev/null || true)"
-printf 'terms list     = %s\n' "${terms:-NONE — create ~/.hermes/privacy-terms.txt before trusting a clean run}"
+printf 'terms list     = %s\n' "${terms:-NONE — create ~/.config/privacy-preflight/terms.txt before trusting a clean run}"
 printf '\nNothing was added to any project. Prove the gate works: bash scripts/verify_gate.sh\n'

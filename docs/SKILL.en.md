@@ -8,9 +8,13 @@ This is the English translation of the skill body. The loadable file an agent re
 The privacy gate that runs before any repository reaches GitHub. The tool lives in the skill, not in
 the project; a project never gains a file.
 
+Portability: the same file loads in Claude Code, Codex, Antigravity or any agent that reads a
+`SKILL.md`, and nothing breaks if you run the scanner with no agent at all. Only the frontmatter keys
+(`name`, `description`, `license`) are standard; there are no runtime-specific ones.
+
 Boundary: this is a machine-wide general tool, not a script pasted into each project. Any plan that
 puts the scanner inside the project is wrong. Install once, every repository is covered, settings
-stay in `~/.hermes/` and in git config.
+stay in `$PRIVACY_PREFLIGHT_HOME` (default `~/.privacy-preflight`) and in git config.
 
 ```bash
 python <skill>/scripts/privacy_scan.py --repo .          # audit: working tree, index, every commit
@@ -42,7 +46,7 @@ bash   <skill>/scripts/verify_gate.sh                    # end-to-end proof: a l
 Kept outside every repository, one entry per line, `#` starts a comment:
 
 ```
-# ~/.hermes/privacy-terms.txt
+# ~/.config/privacy-preflight/terms.txt
 <your real name>
 <English name or account>
 <school / employer>
@@ -50,8 +54,8 @@ Kept outside every repository, one entry per line, `#` starts a comment:
 <old accounts that keep appearing in fixtures>
 ```
 
-Resolution order: `--terms-file` → `$PRIVACY_TERMS_FILE` → `~/.hermes/privacy-terms.txt` →
-`~/.hermes/prepublish-terms.txt` → `~/.config/privacy-preflight/terms.txt`. `--term` adds one word
+Resolution order: `--terms-file` → `$PRIVACY_TERMS_FILE` → `~/.config/privacy-preflight/terms.txt` →
+`~/.privacy-preflight/terms.txt` → `~/.config/privacy-preflight/terms.txt`. `--term` adds one word
 for a single run; `PRIVACY_TERMS="a b"` does the same.
 
 An empty list proves only that there are no keys, paths, emails or IPs. It does **not** prove there is
@@ -108,7 +112,7 @@ history that already entered.
 
 ## One install covers every repository
 
-`install_global_hook.sh` points `core.hooksPath` at `~/.hermes/privacy-hooks` and writes two hooks:
+`install_global_hook.sh` points `core.hooksPath` at `~/.privacy-preflight/hooks` and writes two hooks:
 
 | Hook | When | Scans |
 |---|---|---|

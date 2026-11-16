@@ -12,7 +12,8 @@ set -uo pipefail
 
 skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 scanner="$skill_dir/scripts/privacy_scan.py"
-HOOK_DIR="${PRIVACY_PREFLIGHT_HOME:-$HOME/.hermes/privacy-hooks}"
+HOOK_DIR="${PRIVACY_PREFLIGHT_HOME:-$HOME/.privacy-preflight}/hooks"
+[ -d "$HOOK_DIR" ] || HOOK_DIR="$HOME/.hermes/privacy-hooks"   # legacy install still counts
 pass=0
 fail=0
 

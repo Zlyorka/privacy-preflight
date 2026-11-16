@@ -19,7 +19,8 @@
 
 ```bash
 # 1. 条款清单 —— 唯一要你自己准备的东西，放在任何仓库之外
-cat > ~/.hermes/privacy-terms.txt <<'EOF'
+mkdir -p ~/.config/privacy-preflight
+cat > ~/.config/privacy-preflight/terms.txt <<'EOF'
 # 一行一个，井号开头是注释
 <你的真名>
 <你的账号或英文名>
@@ -34,7 +35,27 @@ bash scripts/install_global_hook.sh
 bash scripts/verify_gate.sh
 ```
 
-`install_global_hook.sh` 把 `core.hooksPath` 指到 `~/.hermes/privacy-hooks`，并以绝对路径指向
+### 任何 agent，或不装 agent
+
+`SKILL.md` 用的是通用 Agent Skills 格式（`name`、`description`、`license`），不含任何 runtime 专属字段，
+所以同一份文件在 Claude Code、Codex、Antigravity、Cursor 或任何读 `SKILL.md` 的 agent 都能加载。
+把目录复制到那个 agent 找 skill 的位置：
+
+```bash
+git clone https://github.com/Zlyorka/privacy-preflight ~/.claude/skills/privacy-preflight
+```
+
+完全不装 agent 也可以 —— 扫描器就是一个没有外部依赖的 Python 文件：
+
+```bash
+git clone https://github.com/Zlyorka/privacy-preflight /tmp/pp
+python /tmp/pp/scripts/privacy_scan.py --repo .
+```
+
+状态放在 `$PRIVACY_PREFLIGHT_HOME`（默认 `~/.privacy-preflight`）与全局 git config，
+换 agent 不用重装关卡。
+
+`install_global_hook.sh` 把 `core.hooksPath` 指到 `~/.privacy-preflight/hooks`，并以绝对路径指向
 这个目录的扫描器。各仓库原本的 hook 会被串联执行，不会被覆盖。已有的 `core.hooksPath` 要用
 `--force` 才能接管；`--uninstall` 还原原值。
 

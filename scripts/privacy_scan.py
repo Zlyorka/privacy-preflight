@@ -23,7 +23,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 # ---------------------------------------------------------------- detection patterns
 
@@ -144,10 +144,13 @@ def resolve_terms_file(explicit: str | None) -> Path | None:
             print(f"error: terms file not found: {path}", file=sys.stderr)
             raise SystemExit(2)
         return path
+    # Neutral locations first, so the tool belongs to no single agent runtime. The last two are
+    # legacy homes kept working for installs made before the paths were made portable.
     candidates = [os.environ.get("PRIVACY_TERMS_FILE"),
+                  "~/.config/privacy-preflight/terms.txt",
+                  "~/.privacy-preflight/terms.txt",
                   "~/.hermes/privacy-terms.txt",
-                  "~/.hermes/prepublish-terms.txt",
-                  "~/.config/privacy-preflight/terms.txt"]
+                  "~/.hermes/prepublish-terms.txt"]
     for candidate in candidates:
         if candidate:
             path = Path(os.path.expanduser(candidate))
@@ -235,7 +238,7 @@ def scan_content(data: bytes, where: str, terms: list[bytes], findings: list[dic
             continue
         if domain.startswith(b"example.") or domain.endswith((b".example", b".test", b".invalid")):
             continue
-        if any(hint in low for hint in (b"@users.noreply.github", b"@types/", b"@hermes")):
+        if any(hint in low for hint in (b"@users.noreply.github", b"@types/", b"@users.noreply")):
             continue
         add(findings, "email", where, value.decode("utf-8", "replace"), line_of(data, match.start()))
     for match in IPV4_RE.finditer(data):

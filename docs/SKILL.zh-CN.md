@@ -7,8 +7,10 @@
 
 推送任何仓库到 GitHub 之前的隐私关卡。工具住在 skill 里，不装进项目；项目里一个文件都不会多。
 
+可移植性：同一份文件在 Claude Code、Codex、Antigravity 或任何读 `SKILL.md` 的 agent 都能加载，完全不装 agent 也能直接跑扫描器。frontmatter 只有 `name`、`description`、`license` 三个标准字段，没有任何 runtime 专属键。
+
 需求边界：这是机器层级的通用工具，不是每个项目贴一份脚本。任何要求把扫描文件放进项目的方案都不符合；
-一次安装、所有仓库生效，设置留在 `~/.hermes/` 与 git config。
+一次安装、所有仓库生效，设置留在 `$PRIVACY_PREFLIGHT_HOME`（默认 `~/.privacy-preflight`）与 git config。
 
 ```bash
 python <skill>/scripts/privacy_scan.py --repo .          # 审计：工作区、索引、每一颗 commit
@@ -35,7 +37,7 @@ bash   <skill>/scripts/verify_gate.sh                    # 端到端证明：泄
 放在仓库外，一行一个，`#` 开头是注释：
 
 ```
-# ~/.hermes/privacy-terms.txt
+# ~/.config/privacy-preflight/terms.txt
 <你的真名>
 <英文名或账号>
 <学校 / 公司>
@@ -43,8 +45,8 @@ bash   <skill>/scripts/verify_gate.sh                    # 端到端证明：泄
 <常被写进 fixture 的旧账号>
 ```
 
-解析顺序：`--terms-file` → `$PRIVACY_TERMS_FILE` → `~/.hermes/privacy-terms.txt` →
-`~/.hermes/prepublish-terms.txt` → `~/.config/privacy-preflight/terms.txt`。也可以用 `--term`
+解析顺序：`--terms-file` → `$PRIVACY_TERMS_FILE` → `~/.config/privacy-preflight/terms.txt` →
+`~/.privacy-preflight/terms.txt` → `~/.config/privacy-preflight/terms.txt`。也可以用 `--term`
 临时加词，或 `PRIVACY_TERMS="a b"`。
 
 清单是空的，那一轮只证明没有密钥、路径、邮箱、IP，**不证明**没有名字。工具会打印警告，退出码仍然是 0；
@@ -96,7 +98,7 @@ commit 身份、commit 信息、`.git/config` 的 remote、untracked 文件。�
 
 ## 一次安装，管住所有仓库
 
-`install_global_hook.sh` 把 `core.hooksPath` 指向 `~/.hermes/privacy-hooks`，写入两个 hook：
+`install_global_hook.sh` 把 `core.hooksPath` 指向 `~/.privacy-preflight/hooks`，写入两个 hook：
 
 | hook | 时机 | 扫什么 |
 |---|---|---|

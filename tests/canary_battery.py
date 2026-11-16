@@ -28,7 +28,7 @@ STAGED_CASES = [
     ("terms", "docs/about.md", "written by CanaryPerson\n", "identity-term"),
     ("url credential", "docs/setup.md", "https://deploy:" + "tok3n" + "@example.com/x\n", "url-credentials"),
     ("private key", "keys/id.txt", "-----BEGIN " + "RSA PRIVATE KEY-----placeholder\n", "credential"),
-    ("ip address", "docs/host.md", "server at 198.51.100.7\n", "ip-address"),
+    ("ip address", "docs/host.md", "server at 10." + "20.30.40\n", "ip-address"),
 ]
 # Cases that need git metadata rather than a file on disk.
 METADATA_CASES = [

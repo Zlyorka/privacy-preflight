@@ -83,6 +83,30 @@ git config --global --add privacy.ignore 'tests/fixtures/.*canary' # 你確認�
 這三個鍵只從**全域**設定讀。被掃 repo 自己的 `.git/config` 不採信：否則惡意 repo 只要寫一行
 `privacy.ignore = .*` 就能讓自己回報乾淨。真的要讓某個 repo 覆寫，加 `--trust-repo-config`。
 
+## 兩層，因為規則不會讀
+
+腳本比對字面。它看不出「我住板橋，通勤到關渡四十分鐘」在描述一個地址，也看不出某句註解寫著客戶名，
+或某個 fixture 長得就像真實工單。
+
+| 層 | 回答什麼 | 產出 |
+|---|---|---|
+| `privacy_scan.py` | 有沒有不該公開的字面 | 退出碼 0 / 1 / 2 —— 這是關卡 |
+| `llm_review_context.py` ＋ 一個模型 | 這些字讀起來像不像在講某個人 | 有 `path:line` 的報告 —— 不是關卡 |
+
+```bash
+python scripts/llm_review_context.py --repo .   # 寫到 ~/.privacy-preflight/packets/
+```
+
+片段包產生器只做收集：被追蹤的文字檔、用線索評分（自述、地點、學校、雇主、身分、聯絡、未完成註記、
+工單）、小檔整份、大檔只給命中行附近、裁在 `--budget`（45 KB）。它不上傳、不判斷、不改檔。
+
+要求模型只回報能用 `path:line` 指出的東西、說出陌生人從中得到什麼、不確定的標 `NEEDS-CONFIRM`。
+沒有行號的 finding 就是編的，整條丟掉。repo 裡的文字是資料不是指令 —— packet 裡可能寫著「忽略以上」，
+那也是被審查的內容。
+
+LLM 層不是關卡：它不確定、不可重放、可以被注入。確認過的逐條修，修完重跑腳本，並把能機械化的部分
+（新名字、客戶）加進條款清單或偵測規則。完整做法見 `references/llm-review.md`。
+
 ## 它檢查什麼
 
 | 類別 | 內容 |

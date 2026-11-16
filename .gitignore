@@ -17,3 +17,7 @@ venv/
 # OS
 Thumbs.db
 .DS_Store
+
+# the second layer's packet: a full-text dump of the repo, never committed
+packet.md
+packets/

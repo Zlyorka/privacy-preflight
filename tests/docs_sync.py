@@ -20,6 +20,7 @@ CATEGORIES = [
     "untracked-file",
 ]
 FLAGS = ["--require-terms", "--trust-repo-config", "--report", "--selftest"]
+TOKENS = ["llm_review_context.py", "references/llm-review.md"]  # the second layer must be documented
 NUMBERS = ["21", "11/11", "8 passed"]
 
 DOCS = ["README.md", "README.zh-TW.md", "README.zh-CN.md"]
@@ -46,6 +47,9 @@ def main() -> int:
         for flag in FLAGS:
             if flag not in text:
                 problems.append(f"{name}: flag '{flag}' is not mentioned")
+        for token in TOKENS:
+            if token not in text:
+                problems.append(f"{name}: '{token}' (the second layer) is not documented")
         for number in NUMBERS:
             if number not in text:
                 problems.append(f"{name}: expected result '{number}' is not stated")
@@ -62,6 +66,9 @@ def main() -> int:
         for flag in FLAGS:
             if flag not in text:
                 problems.append(f"{name}: flag '{flag}' is not mentioned")
+        for token in TOKENS:
+            if token not in text:
+                problems.append(f"{name}: '{token}' (the second layer) is not documented")
 
     scanner = read("scripts/privacy_scan.py")
     version = re.search(r'VERSION = "([^"]+)"', scanner)

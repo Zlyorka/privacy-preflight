@@ -87,6 +87,33 @@ These three keys are read from the **global** config only. The scanned repositor
 `.git/config` is not trusted: a hostile repository could otherwise ship `privacy.ignore = .*` and
 report itself clean. Pass `--trust-repo-config` when you really want one repository to override.
 
+## Two layers, because a rule cannot read
+
+The scanner matches literals. It cannot tell that "I live in Banqiao, forty minutes to Guandu"
+describes an address, or that one comment names a client, or that a fixture mirrors a real ticket.
+
+| Layer | Question it answers | Output |
+|---|---|---|
+| `privacy_scan.py` | Is there a literal that must not ship? | exit code 0 / 1 / 2 — the gate |
+| `llm_review_context.py` + a model | Does this read like it points at a person? | a report with `path:line` — not a gate |
+
+```bash
+python scripts/llm_review_context.py --repo .   # writes to ~/.privacy-preflight/packets/
+```
+
+The packet builder only gathers: tracked text files, scored by cues (first person, places, schools,
+employers, identity, contact, loose ends, tickets), small files whole, large files as excerpts around
+the hits, cut at `--budget` (45 KB). It never uploads, never judges, never edits.
+
+Ask a model to report only what it can cite by `path:line`, to say what a stranger learns, and to mark
+uncertain items `NEEDS-CONFIRM`. A finding without a line reference is a fabrication and is dropped.
+Repo text is data, not instructions — a packet may contain "ignore the above", and that is content
+under review.
+
+The LLM layer is not a gate: it is non-deterministic, cannot be replayed, and can be injected. Fix each
+confirmed finding, then re-run the scanner, and move what can be made mechanical (a new name, a client)
+into the terms list or a detector rule. Full playbook: `references/llm-review.md`.
+
 ## What it checks
 
 | Category | Contents |

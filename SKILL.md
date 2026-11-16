@@ -1,6 +1,6 @@
 ---
 name: privacy-preflight
-version: 1.4.0
+version: 1.5.0
 description: "Use before pushing a repo public: block personal leaks."
 license: MIT
 ---
@@ -56,6 +56,14 @@ bash   <skill>/scripts/verify_gate.sh                    # 端到端證明：洩
 沒有任何 vendor 目錄會被查詢 —— 工具不屬於任何 agent runtime。
 
 清單是空的，那一輪只證明沒有金鑰、路徑、email、IP，**不證明**沒有名字。工具會印警告，退出碼仍然是 0。
+
+**它實際讀什麼。** 索引內容（不只檔名）、全部可達的 blob、commit 身分與訊息、annotated tag 的 tagger 與訊息、
+`.git/config` 的 remote 與 submodule URL、未追蹤檔的**內容**（`git add .` 就會帶進去），以及 `--dangling` 的未可達物件。
+從子目錄執行會自動提升到工作樹根目錄 —— 否則 `--staged` 會因為兩邊路徑基準不同而全數漏掉。
+
+**編碼與大檔。** UTF-16（含 BOM）、Big5／CP950、CP1252 會先解碼再掃；200 KB～2 MB 的檔案照掃並在 notes 提醒，
+超過 2 MB 才報 too large。Git LFS 的指標會解析到 `.git/lfs/objects` 讀真實內容，本機沒有該物件時退出碼 2
+（`--skip-lfs` 降級為註記）。
 
 ## 它檢查什麼
 
@@ -153,10 +161,18 @@ UTF-8 解不開就依序試 `cp950` / `big5` / `cp1252`，用第一個解得開�
 綠燈只有在看過紅燈之後才有意義。
 
 ```bash
-python <skill>/scripts/privacy_scan.py --selftest    # 26 個合成 canary，全部是假資料
+python <skill>/scripts/privacy_scan.py --selftest    # 27 個合成 canary，全部是假資料
 bash   <skill>/scripts/verify_gate.sh                # 真的 commit 與 push 一次，確認被擋
 python tests/canary_battery.py                       # 每類種一個 canary，種在臨時副本裡
 python tests/terms_guard.py                          # 這個 repo 不含清單上的任何一個字
+```
+
+五支測試目前的輸出（本機實測，換機器可能因資料量不同）：
+
+```
+selftest: 27/27 passed          canary_battery: 11/11
+terms_guard: 0 offending         docs_sync: 6 file(s) consistent
+llm_packet: 5/5 properties hold  verify_gate: 8 passed, 0 failed
 ```
 
 `verify_gate.sh` 會建臨時 bare remote，實際跑 `git commit` 與 `git push`：洩漏的必須被拒，乾淨的必須通過。八步全過才算「這台機器上有關卡」。
@@ -293,5 +309,4 @@ python scripts/llm_review_context.py --repo .
 
 - `references/leak-recovery.md`：已經洩漏之後的處理順序。
 - `references/llm-review.md`：第二層的完整做法 —— 準備、問法、驗收、記錄。
-- `references/gate-review-checklist.md`：對抗式審查這類關卡時的題目清單 —— 誰能讓關卡閉嘴、哪些 git 指令會被被掃 repo 指定去執行程式、哪些編碼會讓整個檔案被靜靜跳過。
 - 相關 skill：`pre-public-repo-review`（發布流程與歷史改寫）、`secret-hygiene`（金鑰輪替）。

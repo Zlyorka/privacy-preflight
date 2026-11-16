@@ -198,8 +198,16 @@ machine-readable report.
 A green light means nothing until the red one has been seen.
 
 ```bash
-python <skill>/scripts/privacy_scan.py --selftest    # 26 synthetic canaries, all fake
+python <skill>/scripts/privacy_scan.py --selftest    # 27 synthetic canaries, all fake
 bash   <skill>/scripts/verify_gate.sh                # a real commit and push, and both are blocked
+```
+
+The five tests print, on this machine:
+
+```
+selftest: 27/27 passed          canary_battery: 11/11
+terms_guard: 0 offending         docs_sync: 6 file(s) consistent
+llm_packet: 5/5 properties hold  verify_gate: 8 passed, 0 failed
 ```
 
 `verify_gate.sh` creates a temporary bare remote and runs real `git commit` and `git push`: the leaky

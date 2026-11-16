@@ -65,7 +65,7 @@ python /tmp/pp/scripts/privacy_scan.py --repo .
 python scripts/privacy_scan.py --repo .                     # 审计
 python scripts/privacy_scan.py --repo . --report out.json    # 机器可读报告
 python scripts/privacy_scan.py --repo . --require-terms      # 没有条款清单就拒绝运行
-python scripts/privacy_scan.py --selftest                    # 21 个合成 canary
+python scripts/privacy_scan.py --selftest                    # 27 个合成 canary
 ```
 
 退出码：`0` 干净、`1` 有 finding、`2` 扫不起来。
@@ -106,6 +106,13 @@ python scripts/llm_review_context.py --repo .   # 写到 ~/.privacy-preflight/pa
 
 LLM 层不是关卡：它不确定、不可重放、可以被注入。确认过的逐条修，修完重跑扫描器，并把能机械化的部分
 （新名字、客户）加进条款清单或检测规则。完整做法见 `references/llm-review.md`。
+
+**它实际读什么。** 索引内容（不只文件名）、全部可达 blob、commit 身份与信息、annotated tag 的 tagger 与信息、
+`.git/config` 的 remote 与 submodule URL、未跟踪文件的**内容**（`git add .` 就会带进去），以及 `--dangling`
+的不可达对象。从子目录执行会自动提升到工作树根目录，否则 `--staged` 会因路径基准不同而全数漏掉。
+
+**编码与大文件。** UTF-16、Big5／CP950、CP1252 先解码再扫；200 KB～2 MB 照扫并在 notes 提醒，超过 2 MB 才是
+finding。Git LFS 指标会解析到 `.git/lfs/objects` 读真实内容，本机缺该对象时退出码 2（`--skip-lfs` 降级）。
 
 ## 它检查什么
 
@@ -155,7 +162,7 @@ git 版本都原样输出，后者避免 `git status` 去执行被扫仓库自�
 `--selftest` 为每个类别造一个合成 canary，漏抓任何一个就失败：
 
 ```bash
-python scripts/privacy_scan.py --selftest    # selftest: 26/26 passed
+python scripts/privacy_scan.py --selftest    # selftest: 27/27 passed
 ```
 
 `verify_gate.sh` 建一个临时仓库、commit 一个假凭证，并要求 commit 是**因为扫描器报出来**才被拦 ——
@@ -183,13 +190,13 @@ python tests/terms_guard.py                  # 14 term(s) checked, 0 offending
 同样的指令。
 
 ```bash
-python tests/docs_sync.py                    # docs sync: 3 file(s) consistent
+python tests/docs_sync.py                    # docs sync: 6 file(s) consistent
 ```
 
 `tests/llm_packet.py` 守着片段包生成器：回报格式在任何预算下都留着、被略过的文件一定会被点名、packet 不会落进被扫的仓库。
 
 ```bash
-python tests/llm_packet.py                   # llm packet: 4/4 properties hold
+python tests/llm_packet.py                   # llm packet: 5/5 properties hold
 ```
 
 没看过红灯的绿灯，不算通过。

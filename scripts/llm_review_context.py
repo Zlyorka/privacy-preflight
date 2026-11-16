@@ -26,7 +26,9 @@ from pathlib import Path
 # Cues that a line is worth a human or model reading. Deliberately broad: this pass is not a gate,
 # it decides what to put in front of the reviewer, and the reviewer decides what matters.
 CUES_RAW = [
-    ("self", r"我|我的|我們|本人|\bI\b|\bmy\b|\bme\b|\bwe\b|\bour\b"),
+    # `\bI\b` must stay case-sensitive: with IGNORECASE it matched `for i in range(...)`, so every
+    # code file scored as first-person writing and crowded out the documents.
+    ("self", r"我|我的|我們|本人|\bI\b|(?i:\b(?:my|me|we|our)\b)"),
     ("place", r"住|地址|戶籍|新北|台北|臺北|桃園|台中|臺中|台南|臺南|高雄|板橋|中和|新莊|淡水"),
     ("school", r"大學|學院|研究所|高中|高職|國中|科大|系所|畢業|學號|指導教授"),
     ("employer", r"公司|任職|在職|實習|打工|客戶|廠商|統編|部門|主管|同事"),
@@ -39,7 +41,7 @@ CUES: list[tuple[str, re.Pattern[str]]] = [
     (name, re.compile(pattern, re.IGNORECASE)) for name, pattern in CUES_RAW
 ]
 TEXT_EXT = {
-    ".md", ".txt", ".py", ".js", ".ts", ".tsx", ".jsx", ".json", ".ya?ml", ".yml", ".toml", ".ini",
+    ".md", ".txt", ".py", ".js", ".ts", ".tsx", ".jsx", ".json", ".yaml", ".yml", ".toml", ".ini",
     ".cfg", ".sh", ".bash", ".ps1", ".sql", ".csv", ".html", ".css", ".java", ".go", ".rs", ".rb",
     ".php", ".kt", ".swift", ".c", ".h", ".cpp", ".cs", ".env", ".conf", ".lock",
 }
@@ -48,8 +50,8 @@ TEXT_EXT = {
 CODE_EXT = {".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".go", ".rs", ".rb", ".php", ".kt",
             ".swift", ".c", ".h", ".cpp", ".cs", ".sh", ".bash", ".ps1", ".sql"}
 RISKY_PATH = re.compile(
-    r"(test|spec|fixture|sample|demo|doc|readme|note|todo|changelog|about|profile|resume|履歷|"
-    r"工作日誌|會議|紀錄|log)", re.IGNORECASE)
+    r"(?:^|[/._-])(?:tests?|spec|fixtures?|samples?|demos?|docs?|readmes?|notes?|todo|changelog|"
+    r"about|profile|resume|履歷|工作日誌|會議|紀錄|logs?)(?:$|[/._-])", re.IGNORECASE)
 SMALL_FILE = 8_000     # whole file when it is small: the risk often lives in the framing, not a line
 MAX_FILE = 400_000     # never read a file bigger than this; the scanner reports it separately
 
@@ -69,9 +71,10 @@ def is_binary(data: bytes) -> bool:
 
 def score(name: str, size: int, hits: dict[str, int]) -> int:
     value = 0
-    if RISKY_PATH.search(name):
+    risky = bool(RISKY_PATH.search(name))
+    if risky:
         value += 3
-    if size < SMALL_FILE:
+    if (hits or risky) and size < SMALL_FILE:
         value += 1
     for cue, count in hits.items():
         value += {"self": 3, "place": 3, "employer": 3, "school": 2, "identity": 3,
@@ -83,6 +86,39 @@ def score(name: str, size: int, hits: dict[str, int]) -> int:
     # A very large file costs the packet a lot of budget for the same evidence.
     value -= min(4, size // 40_000)
     return value
+
+
+def chosen_names_from_blocks(block: str) -> str:
+    """The `### \`name\`` header identifies which file a dropped block belonged to."""
+    for line in block.splitlines():
+        if line.startswith("### `") and line.endswith("`"):
+            return line[5:-1]
+    return "?"
+
+
+def byte_len(text: str) -> int:
+    """Budgets are bytes. Counting characters let a Chinese packet run to ~3x the limit."""
+    return len(text.encode("utf-8"))
+
+
+def clamp_bytes(text: str, limit: int) -> str:
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text
+    cut = encoded[:limit].decode("utf-8", "ignore")
+    return cut.rsplit("\n", 1)[0] + "\n   … rest of this file omitted at the packet budget …"
+
+
+def fence(text: str) -> str:
+    """Fence longer than the longest backtick run inside the content, so a file containing ```
+    cannot break out of its block and fake a section of the packet."""
+    longest = 0
+    run = 0
+    for char in text:
+        run = run + 1 if char == "`" else 0
+        longest = max(longest, run)
+    ticks = "`" * max(3, longest + 1)
+    return f"{ticks}\n{text}\n{ticks}\n"
 
 
 def excerpt(lines: list[str], index: int, context: int = 2) -> list[str]:
@@ -102,7 +138,9 @@ def main() -> int:
 
     repo = Path(args.repo).expanduser().resolve()
     try:
-        names = [line.decode("utf-8", "replace") for line in git(repo, "ls-files").split(b"\n") if line]
+        # -z: a name with a space or a newline would otherwise split into pieces and vanish.
+        names = [chunk.decode("utf-8", "replace")
+                 for chunk in git(repo, "ls-files", "-z").split(b"\x00") if chunk]
     except SystemExit as error:
         print(error, file=sys.stderr)
         return 2
@@ -112,7 +150,18 @@ def main() -> int:
     for name in names:
         path = repo / name
         suffix = path.suffix.lower()
-        if suffix not in TEXT_EXT or not path.is_file():
+        if suffix not in TEXT_EXT:
+            continue
+        # is_file() follows a symlink, so check the link first: a repo could otherwise point a
+        # reviewed file at ~/.ssh/id_rsa and the packet would carry it to whoever reads it.
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            stat = path.lstat()
+        except OSError:
+            continue
+        if stat.st_size > MAX_FILE and suffix in TEXT_EXT:
+            too_large.append(f"{name} ({stat.st_size // 1024} KB)")
             continue
         try:
             data = path.read_bytes()
@@ -192,48 +241,72 @@ def main() -> int:
         if allowance < 400:
             skipped.append(record["name"])
             continue
-        if record["size"] < SMALL_FILE:
-            body = "\n".join(f"{number + 1:>5}| {line}"
-                             for number, line in enumerate(record["lines"]))
-            if len(body) > allowance:
-                cut = body[:allowance].rsplit("\n", 1)[0]
-                body = cut + "\n   … rest of this file omitted at the packet budget …"
-            block = f"\n### `{record['name']}`\n```\n{body}\n```\n"
-        else:
-            parts: list[str] = []
-            shown: set[int] = set()
-            used = 0
-            for _cue, pattern in CUES:
-                for number, line in enumerate(record["lines"]):
-                    if not pattern.search(line):
-                        continue
-                    start = max(0, number - 2)
-                    if start in shown:
-                        continue
-                    piece = "\n".join(excerpt(record["lines"], number))
-                    if used + len(piece) > allowance:
-                        break
-                    shown.add(start)
-                    parts.append(f"```\n{piece}\n```\n")
-                    used += len(piece)
-                if used >= allowance:
-                    break
-            if not parts:
-                skipped.append(record["name"])
-                continue
-            block = f"\n### `{record['name']}`\n" + "".join(parts)
-        blocks.append(block)
-        remaining -= len(block.encode("utf-8"))
+        is_code = Path(record["name"]).suffix.lower() in CODE_EXT
 
-    if skipped:
-        head.append(f"\n> {len(skipped)} selected file(s) did not fit the "
-                    f"{args.budget}-byte budget and were not quoted: "
-                    + ", ".join(f"`{name}`" for name in skipped)
+        # One pass over the lines, in line order: the old loop went cue by cue, so the first cue
+        # spent the whole allowance and the file came out unsorted.
+        hit_lines: list[int] = []
+        for number, line in enumerate(record["lines"]):
+            for cue, pattern in CUES:
+                if is_code and cue == "contact":
+                    continue    # a decorator is not a contact detail
+                if pattern.search(line):
+                    hit_lines.append(number)
+                    break
+
+        if record["size"] < SMALL_FILE or not hit_lines:
+            # A short file, or a long one picked only by its path: show the start of it.
+            limit = len(record["lines"]) if record["size"] < SMALL_FILE else 40
+            body = "\n".join(f"{number + 1:>5}| {line}"
+                             for number, line in enumerate(record["lines"][:limit]))
+            body = clamp_bytes(body, allowance)
+            blocks.append(f"\n### `{record['name']}`\n" + fence(body))
+            remaining -= byte_len(blocks[-1])
+            continue
+
+        ranges: list[tuple[int, int]] = []
+        for number in hit_lines:
+            start, stop = max(0, number - 2), min(len(record["lines"]), number + 3)
+            if ranges and start <= ranges[-1][1] + 5:
+                ranges[-1] = (ranges[-1][0], max(ranges[-1][1], stop))
+            else:
+                ranges.append((start, stop))
+
+        parts: list[str] = []
+        used = 0
+        for start, stop in ranges:
+            piece = "\n".join(f"{number + 1:>5}| {record['lines'][number]}"
+                               for number in range(start, stop))
+            piece_bytes = byte_len(piece)
+            if used + piece_bytes > allowance:
+                break
+            parts.append(piece)
+            used += piece_bytes
+        if not parts:
+            skipped.append(record["name"])
+            continue
+        block = f"\n### `{record['name']}`\n" + "".join(fence(piece) for piece in parts)
+        blocks.append(block)
+        remaining -= byte_len(block)
+
+    # Assemble, then drop whole excerpts from the end until the result really fits. The note that
+    # names the dropped files is part of the size, so it cannot be appended afterwards and hoped for.
+    def assemble(dropped: list[str]) -> str:
+        note = ""
+        if dropped:
+            note = (f"\n> {len(dropped)} selected file(s) did not fit the {args.budget}-byte budget "
+                    f"and were not quoted: " + ", ".join(f"`{name}`" for name in dropped)
                     + ". Raise `--budget` or use `--top` to narrow the selection.\n")
+        return "".join(head) + note + "\n## Excerpts\n" + "".join(blocks) + "".join(tail)
+
+    while blocks and byte_len(assemble(skipped)) > args.budget:
+        skipped.append(chosen_names_from_blocks(blocks.pop()))
+    packet = assemble(skipped)
+    if byte_len(packet) > args.budget:
+        packet = clamp_bytes(packet, args.budget)
+    if skipped:
         print(f"warning: {len(skipped)} selected file(s) omitted at the budget: "
               + ", ".join(skipped), file=sys.stderr)
-
-    packet = "".join(head) + "\n## Excerpts\n" + "".join(blocks) + "".join(tail)
     if args.out:
         target: Path | None = Path(os.path.expanduser(args.out))
     else:

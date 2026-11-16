@@ -68,9 +68,10 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 fail=0
 
 # The repository's own hook, which core.hooksPath makes invisible to git still has to run.
-common="$(git rev-parse --git-common-dir 2>/dev/null || echo .git)"
-case "$common" in /*) ;; *) common="$root/$common" ;; esac
-own="$common/hooks/pre-push"
+# --git-path resolves worktrees and absolute paths for us; the old prefix test broke on a Windows
+# path such as <drive>:/repo/.git, which it joined onto $root.
+own="$(git rev-parse --git-path hooks/pre-push 2>/dev/null || echo "")"
+[ -n "$own" ] || own="$(git rev-parse --git-common-dir 2>/dev/null || echo .git)/hooks/pre-push"
 if [ -x "$own" ] && ! cmp -s "$own" "$HOOK_DIR/pre-push" 2>/dev/null; then
   "$own" "$@" || fail=1
 fi
@@ -106,9 +107,8 @@ HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 fail=0
 
-common="$(git rev-parse --git-common-dir 2>/dev/null || echo .git)"
-case "$common" in /*) ;; *) common="$root/$common" ;; esac
-own="$common/hooks/pre-commit"
+own="$(git rev-parse --git-path hooks/pre-commit 2>/dev/null || echo "")"
+[ -n "$own" ] || own="$(git rev-parse --git-common-dir 2>/dev/null || echo .git)/hooks/pre-commit"
 if [ -x "$own" ] && ! cmp -s "$own" "$HOOK_DIR/pre-commit" 2>/dev/null; then
   "$own" "$@" || fail=1
 fi
@@ -139,7 +139,7 @@ chmod +x "$HOOK_DIR/pre-push" "$HOOK_DIR/pre-commit" 2>/dev/null || true
 printf 'installed: %s\n' "$HOOK_DIR/pre-push, $HOOK_DIR/pre-commit"
 printf 'core.hooksPath = %s\n' "$HOOK_DIR_NATIVE"
 printf 'scanner        = %s\n' "$scanner"
-terms="$(python3 -c 'import os
+terms="$("$py" -c 'import os
 from pathlib import Path
 for c in (os.environ.get("PRIVACY_TERMS_FILE"), "~/.config/privacy-preflight/terms.txt",
           "~/.privacy-preflight/terms.txt"):

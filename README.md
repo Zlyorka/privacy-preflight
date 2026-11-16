@@ -68,7 +68,7 @@ Use `--force` to take over a `core.hooksPath` that is already set, and `--uninst
 python scripts/privacy_scan.py --repo .                     # audit
 python scripts/privacy_scan.py --repo . --report out.json    # machine-readable report
 python scripts/privacy_scan.py --repo . --require-terms      # refuse to run without a terms list
-python scripts/privacy_scan.py --selftest                    # 26 synthetic canaries
+python scripts/privacy_scan.py --selftest                    # 27 synthetic canaries
 ```
 
 Exit codes: `0` clean, `1` findings, `2` the scan could not run.
@@ -113,6 +113,16 @@ under review.
 The LLM layer is not a gate: it is non-deterministic, cannot be replayed, and can be injected. Fix each
 confirmed finding, then re-run the scanner, and move what can be made mechanical (a new name, a client)
 into the terms list or a detector rule. Full playbook: `references/llm-review.md`.
+
+**What it actually reads.** Index blobs (not just names), every reachable blob, commit identities and
+messages, annotated tag taggers and messages, remote and submodule URLs in `.git/config`, the
+*content* of untracked files (one `git add .` away from being published), and — with `--dangling` —
+objects no ref points at. Run from a subdirectory and it moves itself to the work-tree root; otherwise
+`--staged` silently matched nothing.
+
+**Encoding and size.** UTF-16, Big5/CP950 and CP1252 are decoded before the scan. Files between
+200 KB and 2 MB are scanned with a note; over 2 MB is a finding. A Git LFS pointer is resolved against
+`.git/lfs/objects` and its real bytes are scanned — a missing object is exit 2 unless `--skip-lfs`.
 
 ## What it checks
 
@@ -165,7 +175,7 @@ the scanned repository's own `.git/config`.
 `--selftest` builds synthetic canaries for every category and fails if one is missed:
 
 ```bash
-python scripts/privacy_scan.py --selftest    # selftest: 26/26 passed
+python scripts/privacy_scan.py --selftest    # selftest: 27/27 passed
 ```
 
 `verify_gate.sh` creates a temporary repository, commits a fake credential, and asserts that the
@@ -194,13 +204,13 @@ python tests/terms_guard.py                  # 14 term(s) checked, 0 offending
 version, the same twelve category names and the same commands.
 
 ```bash
-python tests/docs_sync.py                    # docs sync: 3 file(s) consistent
+python tests/docs_sync.py                    # docs sync: 6 file(s) consistent
 ```
 
 `python tests/llm_packet.py` guards the packet builder: the report format survives any budget, an omitted file is always named, and the packet never lands inside the repository.
 
 ```bash
-python tests/llm_packet.py                   # llm packet: 4/4 properties hold
+python tests/llm_packet.py                   # llm packet: 5/5 properties hold
 ```
 
 A green scan means nothing until the scan has been seen to fail.

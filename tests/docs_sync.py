@@ -21,7 +21,7 @@ CATEGORIES = [
 ]
 FLAGS = ["--require-terms", "--trust-repo-config", "--report", "--selftest", "--dangling"]
 TOKENS = ["llm_review_context.py", "references/llm-review.md"]  # the second layer must be documented
-NUMBERS = ["26", "11/11", "8 passed"]
+NUMBERS = ["27/27", "11/11", "8 passed", "6 file(s)", "5/5"]
 
 DOCS = ["README.md", "README.zh-TW.md", "README.zh-CN.md"]
 SPECS = ["SKILL.md", "docs/SKILL.en.md", "docs/SKILL.zh-CN.md"]
@@ -47,12 +47,21 @@ def main() -> int:
         for flag in FLAGS:
             if flag not in text:
                 problems.append(f"{name}: flag '{flag}' is not mentioned")
+        for number in ["27/27", "6 file(s)"]:
+            if number not in text:
+                problems.append(f"{name}: expected result '{number}' is not stated")
+        for referenced in set(re.findall(r"references/[A-Za-z0-9_.-]+\.md", text)):
+            if not (ROOT / referenced).is_file():
+                problems.append(f"{name}: points at {referenced}, which does not exist")
         for token in TOKENS:
             if token not in text:
                 problems.append(f"{name}: '{token}' (the second layer) is not documented")
         for number in NUMBERS:
             if number not in text:
                 problems.append(f"{name}: expected result '{number}' is not stated")
+        for referenced in set(re.findall(r"references/[A-Za-z0-9_.-]+\.md", text)):
+            if not (ROOT / referenced).is_file():
+                problems.append(f"{name}: points at {referenced}, which does not exist")
         for other in DOCS:
             if other != name and other not in text:
                 problems.append(f"{name}: no link to {other}")
@@ -66,6 +75,12 @@ def main() -> int:
         for flag in FLAGS:
             if flag not in text:
                 problems.append(f"{name}: flag '{flag}' is not mentioned")
+        for number in ["27/27", "6 file(s)"]:
+            if number not in text:
+                problems.append(f"{name}: expected result '{number}' is not stated")
+        for referenced in set(re.findall(r"references/[A-Za-z0-9_.-]+\.md", text)):
+            if not (ROOT / referenced).is_file():
+                problems.append(f"{name}: points at {referenced}, which does not exist")
         for token in TOKENS:
             if token not in text:
                 problems.append(f"{name}: '{token}' (the second layer) is not documented")

@@ -8,9 +8,10 @@ Every canary is assembled at run time, so this file contains no literal that mat
 Run from the repository root:  python tests/canary_battery.py
 Exit 0 when every class is caught; 1 when one is missed.
 """
-import shutil
+import io
 import subprocess
 import sys
+import tarfile
 import tempfile
 from pathlib import Path
 
@@ -27,6 +28,12 @@ STAGED_CASES = [
     ("terms", "docs/about.md", "written by CanaryPerson\n", "identity-term"),
     ("url credential", "docs/setup.md", "https://deploy:" + "tok3n" + "@example.com/x\n", "url-credentials"),
     ("private key", "keys/id.txt", "-----BEGIN " + "RSA PRIVATE KEY-----placeholder\n", "credential"),
+    ("ip address", "docs/host.md", "server at 198.51.100.7\n", "ip-address"),
+]
+# Cases that need git metadata rather than a file on disk.
+METADATA_CASES = [
+    ("commit identity", "commit-identity", "RealName" + " Person", "person" + "@" + "real-host.dev"),
+    ("commit message", "commit-message", "fix for CanaryPerson", None),
 ]
 
 
@@ -35,11 +42,9 @@ def export(destination: Path) -> None:
     archive = subprocess.run(["git", "archive", "HEAD"], cwd=str(ROOT), capture_output=True)
     if archive.returncode != 0:
         raise SystemExit("canary battery: git archive failed — commit something first")
-    tar = subprocess.run(["tar", "-x", "-C", str(destination)], input=archive.stdout,
-                         capture_output=True)
-    if tar.returncode != 0:
-        raise SystemExit("canary battery: could not unpack the export: "
-                         + tar.stderr.decode("utf-8", "replace").strip())
+    # tarfile instead of an external `tar`: on Windows an MSYS tar reads `D:` as a remote host.
+    with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as bundle:
+        bundle.extractall(destination)
     subprocess.run(["git", "init", "-q"], cwd=str(destination), capture_output=True, check=True)
     subprocess.run(["git", "config", "core.hooksPath", str(destination / ".no-hooks")],
                    cwd=str(destination), capture_output=True, check=True)
@@ -79,6 +84,28 @@ def main() -> int:
             subprocess.run(["git", "reset", "-q"], cwd=str(work), capture_output=True)
             target.unlink()
 
+        # An untracked file is not in the index, so --staged cannot see it: a full scan must read it.
+        (work / "notes.tmp").write_text("written by Canary" + "Person\n", encoding="utf-8")
+        code, out = scan(work, ["--term", "Canary" + "Person"])
+        # Content hits keep their own category (`identity-term` here); the location marks it as
+        # untracked, which is what tells the reader it is not committed yet.
+        ok = code == 1 and "untracked: notes.tmp" in out
+        print(f"  {'PASS' if ok else 'FAIL'}  untracked file content is read -> untracked: location")
+        failures += 0 if ok else 1
+        (work / "notes.tmp").unlink()
+
+        print("  -- metadata cases --")
+        for label, category, message, email in METADATA_CASES:
+            commit_args = ["git", "-c", "user.name=canary"]
+            commit_args += ["-c", "user.email=" + (email or "dev@localhost")]
+            subprocess.run(commit_args + ["commit", "-q", "--allow-empty", "--no-verify", "-m", message],
+                           cwd=str(work), capture_output=True)
+            args = [] if category == "commit-identity" else ["--term", "Canary" + "Person"]
+            code, out = scan(work, args)
+            ok = code == 1 and category in out
+            print(f"  {'PASS' if ok else 'FAIL'}  {label} -> {category}")
+            failures += 0 if ok else 1
+
         print("  -- full scan cases --")
         subprocess.run(["git", "remote", "add", "canary",
                         "https://user:" + "tok3n" + "@example.com/x.git"],
@@ -96,7 +123,7 @@ def main() -> int:
         failures += 0 if ok else 1
         (work / "terms.txt").unlink()
 
-    total = len(STAGED_CASES) + 2
+    total = len(STAGED_CASES) + len(METADATA_CASES) + 3
     print(f"battery: {total - failures}/{total}")
     return 1 if failures else 0
 

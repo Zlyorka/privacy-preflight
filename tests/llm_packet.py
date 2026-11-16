@@ -6,10 +6,11 @@ Four properties matter and each one broke once while the builder was being writt
    leaving the reviewer with examples but no instructions,
 2. a file that does not fit is named, never silently missing,
 3. the packet never lands inside the repository it describes,
-4. a text file too large to read is named in the packet, never silently absent.
+4. a text file too large to read is named in the packet, never silently absent,
+5. the packet really fits the byte budget it was given.
 
 Run from the repository root:  python tests/llm_packet.py
-Exit 0 when all three hold; 1 otherwise.
+Exit 0 when all five hold; 1 otherwise.
 """
 import os
 import subprocess
@@ -55,6 +56,9 @@ def main() -> int:
         if proc.returncode != 0:
             problems.append(f"the builder failed: {proc.stderr.strip()[:200]}")
         text = out.read_text(encoding="utf-8") if out.is_file() else ""
+        size = out.stat().st_size if out.is_file() else 0
+        if size > 6000:
+            problems.append(f"packet is {size} bytes, over the 6000-byte budget")
         if "## Report format" not in text:
             problems.append("the report format was cut by the budget")
         if "did not fit" not in text and "omitted at the packet budget" not in text:
@@ -94,7 +98,7 @@ def main() -> int:
     if problems:
         print(f"llm packet: {len(problems)} problem(s)")
         return 1
-    print("llm packet: 4/4 properties hold")
+    print("llm packet: 5/5 properties hold")
     return 0
 
 

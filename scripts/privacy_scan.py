@@ -23,7 +23,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 
 # ---------------------------------------------------------------- detection patterns
 
@@ -42,7 +42,9 @@ SECRET_PATTERNS = [
     ("npm-token", rb"npm_[A-Za-z0-9]{30,}"),
     ("private-key", rb"-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----"),
     ("connection-string", rb"(?:postgres|postgresql|mysql|mariadb|mongodb(?:\+srv)?|redis|amqp|amqps)://[^\s:@/]+:[^\s@/]+@"),
-    ("url-credentials", rb"[a-z][a-z0-9+.\-]{1,10}://[^\s/:@]+:[^\s/@]+@"),
+    # A query string may contain `user@host`; require the password part to look like one and forbid
+    # the characters that mean "this is a URL query, not credentials".
+    ("url-credentials", rb"[a-z][a-z0-9+.\-]{1,10}://[^\s/:@?=&]+:[^\s/@?=&]+@"),
     ("jwt", rb"eyJ[A-Za-z0-9_\-]{12,}\.[A-Za-z0-9_\-]{12,}\.[A-Za-z0-9_\-]{12,}"),
 ]
 SECRETS = [(name, re.compile(pattern)) for name, pattern in SECRET_PATTERNS]
@@ -62,12 +64,13 @@ EMAIL_RE = re.compile(rb"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 IPV4_RE = re.compile(rb"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
 # Things that identify one person directly rather than by credential shape.
 PHONE_RE = re.compile(rb"(?<![\d\-])09\d{2}-?\d{3}-?\d{3}(?![\d\-])")
-NATIONAL_ID_RE = re.compile(rb"(?<![A-Za-z0-9])[A-Z][12]\d{8}(?![0-9])")
+NATIONAL_ID_RE = re.compile(rb"(?<![A-Za-z0-9])[A-Z](?:[12]\d{8}|[89]\d{8})(?![0-9A-Za-z])")
 # A password or token embedded in a remote URL, read from .git/config rather than a file.
 REMOTE_CRED_RE = re.compile(rb"://[^\s/:@]+:[^\s/@]+@")
 
 PLACEHOLDER_EMAIL_DOMAINS = (b"example.com", b"example.org", b"example.net", b"localhost",
                              b"localhost.localdomain", b"test", b"invalid", b"example")
+DOC_IP_PREFIXES = (b"192.0.2.", b"198.51.100.", b"203.0.113.")
 PLACEHOLDER_IPS = {b"0.0.0.0", b"127.0.0.1", b"255.255.255.0", b"255.255.255.255"}
 
 # Files that must never be in a public repository at all.
@@ -126,9 +129,12 @@ def line_of(data: bytes, offset: int) -> int:
 
 
 def normalize_path(value: str) -> str:
-    """Strip a leading ./ only. `lstrip('./')` would eat the dot of `.github/x`."""
-    value = value.strip()
-    return value[2:] if value.startswith("./") else value
+    """Match what `git ls-files` prints: forward slashes, no leading ./. PowerShell Tab-completion
+    hands over `scripts\\privacy_scan.py`, which never matched a path before."""
+    value = value.strip().replace("\\", "/")
+    while value.startswith("./"):
+        value = value[2:]
+    return value
 
 
 def add(findings: list[dict], category: str, where: str, detail: str, line: int | None = None) -> None:
@@ -175,6 +181,14 @@ def load_terms(path: Path | None, extra: list[str]) -> tuple[list[bytes], int]:
     return terms, len(raw)
 
 
+def term_pattern(needle: bytes) -> re.Pattern[bytes]:
+    """The same rule term_hits applies, as a pattern: short ASCII words need a word boundary, so a
+    list entry `lin` does not fire on `linear`."""
+    if needle.isascii() and needle.isalpha() and len(needle) < 6:
+        return re.compile(rb"(?<![a-z0-9])" + re.escape(needle) + rb"(?![a-z0-9])")
+    return re.compile(re.escape(needle))
+
+
 def term_hits(text_lower: bytes, terms: list[bytes]) -> list[bytes]:
     hits = []
     for term in terms:
@@ -192,6 +206,22 @@ def term_hits(text_lower: bytes, terms: list[bytes]) -> list[bytes]:
 # ---------------------------------------------------------------- content scan
 
 LFS_POINTER = re.compile(rb"^version https://git-lfs\.github\.com/spec/v1\s*$", re.MULTILINE)
+
+
+LETTER_VALUE = {letter: index + 10 for index, letter in enumerate("ABCDEFGHJKLMNPQRSTUVXYWZIO")}
+
+
+def national_id_valid(value: bytes) -> bool:
+    """Taiwan ID checksum: letter -> two digits, weights 1 9 8 7 6 5 4 3 2 1 1, sum % 10 == 0.
+
+    Without it, any nine-digit serial inside a hash was reported as an ID."""
+    text = value.decode("ascii", "replace")
+    code = LETTER_VALUE.get(text[0])
+    if code is None:
+        return False
+    digits = [code // 10, code % 10] + [int(char) for char in text[1:]]
+    weights = [1, 9, 8, 7, 6, 5, 4, 3, 2, 1, 1]
+    return sum(digit * weight for digit, weight in zip(digits, weights)) % 10 == 0
 
 
 def is_lfs_pointer(data: bytes) -> bool:
@@ -227,10 +257,8 @@ def scan_content(data: bytes, where: str, terms: list[bytes], findings: list[dic
     if is_binary(data):
         return
     if is_lfs_pointer(data):
-        # The blob is a pointer; the bytes a user actually sees live in LFS storage and are never
-        # read here. Saying "clean" for such a file would be a false reassurance.
-        add(findings, "sensitive-file", where,
-            "Git LFS pointer: the real content is not in the repository and was not scanned")
+        # The blob is a pointer. The caller resolves it against .git/lfs/objects: reporting every
+        # LFS file as a leak would fail every repository that legitimately uses LFS.
         return
     data = to_utf8(data)
     seen: set[tuple[int, str]] = set()
@@ -252,6 +280,11 @@ def scan_content(data: bytes, where: str, terms: list[bytes], findings: list[dic
                     continue
                 if name == "unc-path" and value.strip(b"\\").split(b"\\")[0].lower() in PLACEHOLDER_HOSTS:
                     continue
+                if name == "windows-path":
+                    first = value[3:].split(b"/")[0].split(b"\\")[0]
+                    if len(first) <= 1:
+                        # `sed 's/a:/b/'` is not a drive. A single-letter first component is noise.
+                        continue
                 add(findings, "machine-path", where,
                     f"{name} {value.decode('utf-8', 'replace')}",
                     line_of(data, match.start()))
@@ -274,19 +307,33 @@ def scan_content(data: bytes, where: str, terms: list[bytes], findings: list[dic
         value = match.group(0)
         if value in PLACEHOLDER_IPS:
             continue
+        if any(value.startswith(prefix) for prefix in DOC_IP_PREFIXES):
+            continue   # RFC 5737 documentation ranges
+        before = data[max(0, match.start() - 1):match.start()]
+        if before in (b"v", b"V"):
+            continue   # v1.2.3.4 is a version number
         if any(int(part) > 255 for part in value.split(b".")):
             continue
         add(findings, "ip-address", where, value.decode("utf-8", "replace"), line_of(data, match.start()))
     lowered = data.lower()
     for term in term_hits(lowered, terms):
-        offset = lowered.find(term.lower())
-        add(findings, "identity-term", where, term.decode("utf-8", "replace"),
-            line_of(data, offset) if offset >= 0 else None)
+        needle = term.lower()
+        pattern = term_pattern(needle)
+        reported = 0
+        for match in pattern.finditer(lowered):
+            add(findings, "identity-term", where, term.decode("utf-8", "replace"),
+                line_of(data, match.start()))
+            reported += 1
+            if reported >= 5:   # a generated file can hold thousands; five lines is enough to act on
+                break
     for match in PHONE_RE.finditer(data):
         add(findings, "phone", where, match.group(0).decode("utf-8", "replace"),
             line_of(data, match.start()))
     for match in NATIONAL_ID_RE.finditer(data):
-        add(findings, "national-id", where, match.group(0).decode("utf-8", "replace"),
+        value = match.group(0)
+        if value[1:2] in (b"1", b"2") and not national_id_valid(value):
+            continue   # nine digits that fail the checksum are a serial number, not an ID
+        add(findings, "national-id", where, value.decode("utf-8", "replace"),
             line_of(data, match.start()))
 
 
@@ -345,24 +392,28 @@ def index_entries(repo: Path) -> list[tuple[str, str, int]]:
     return entries
 
 
-def check_path_name(path: str, findings: list[dict], where: str) -> None:
+def check_path_name(path: str, findings: list[dict], where: str,
+                    category: str = "sensitive-file") -> None:
+    # The trailing `if path.startswith(".") ... return` used to sit here and did nothing: every
+    # branch above already returned. Kept out on purpose, so nobody restores it thinking it filters.
     base = path.rsplit("/", 1)[-1]
     if SENSITIVE_FILE.search("/" + path) and not PLACEHOLDER_FILE_HINT.search(base):
-        add(findings, "sensitive-file", where, path)
-        return
-    if path.startswith(".") or "/." in path:
-        return
+        add(findings, category, where, path)
 
 
 def scan_index(repo: Path, terms: list[bytes], findings: list[dict], allow: set[str],
-               data_dirs: list[str], only_paths: list[str] | None = None) -> int:
+               data_dirs: list[str], only_paths: list[str] | None = None,
+               notes: list[str] | None = None, lfs_state: dict | None = None) -> int:
     entries = index_entries(repo)
     if only_paths is not None:
         wanted = set(only_paths)
         entries = [entry for entry in entries if entry[0] in wanted]
     selected = []
+    lfs_state = lfs_state if lfs_state is not None else {}
+    submodules = 0
     for path, sha, mode in entries:
-        if mode == 0o160000:  # submodule pointer
+        if mode == 0o160000:  # gitlink: the submodule is another repository, not scanned here
+            submodules += 1
             continue
         selected.append((path, sha))
         where = f"tree: {path}"
@@ -371,6 +422,9 @@ def scan_index(repo: Path, terms: list[bytes], findings: list[dict], allow: set[
             if path.startswith(directory.rstrip("/") + "/"):
                 add(findings, "sensitive-file", where, f"inside data directory {directory}")
                 break
+    if submodules and notes is not None:
+        notes.append(f"{submodules} submodule(s) are not scanned: they are separate repositories, "
+                     f"run this scanner inside each one")
     shas = sorted({sha for _path, sha in selected})
     kinds = batch_check(repo, shas)
     scannable = [sha for sha in shas if kinds.get(sha, ("", 0))[1] <= MAX_TEXT_BYTES]
@@ -383,14 +437,57 @@ def scan_index(repo: Path, terms: list[bytes], findings: list[dict], allow: set[
             if size > MAX_TEXT_BYTES:
                 add(findings, "sensitive-file", where, f"{size} bytes, too large to scan")
             continue
-        if len(data) > 200_000:
-            add(findings, "sensitive-file", where, f"large file {len(data)} bytes, review by hand")
-        scan_content(data, where, terms, findings, skip_paths=path in allow)
+        if len(data) > 200_000 and notes is not None:
+            # A lock file is not a leak. Report a size note, then scan it like any other file —
+            # a gate that fails on package-lock.json gets --no-verify within a week.
+            notes.append(f"{where} is {len(data)} bytes: scanned, but read it by hand if it is prose")
+        if is_lfs_pointer(data):
+            scan_lfs_pointer(repo, data, where, terms, findings, lfs_state)
+        else:
+            scan_content(data, where, terms, findings, skip_paths=path in allow)
     return len(selected)
 
 
+def unquote_c_style(value: bytes) -> bytes:
+    r"""Undo git's C-style quoting: \, ", 	, 
+, \ooo."""
+    if not (value.startswith(b'"') and value.endswith(b'"') and len(value) >= 2):
+        return value
+    body = value[1:-1]
+    out = bytearray()
+    index = 0
+    escapes = {ord("n"): 10, ord("t"): 9, ord("r"): 13, ord("a"): 7, ord("b"): 8,
+               ord("f"): 12, ord("v"): 11, ord("\\"): 92, ord('"'): 34}
+    while index < len(body):
+        char = body[index]
+        if char != 92:  # backslash
+            out.append(char)
+            index += 1
+            continue
+        index += 1
+        if index >= len(body):
+            break
+        code = body[index]
+        if code in escapes:
+            out.append(escapes[code])
+            index += 1
+        elif 48 <= code <= 55:  # octal escape of up to three digits
+            digits = body[index:index + 3]
+            take = 0
+            while take < len(digits) and 48 <= digits[take] <= 55:
+                take += 1
+            out.append(int(digits[:take], 8) & 0xFF)
+            index += take
+        else:
+            out.append(code)
+            index += 1
+    return bytes(out)
+
+
 def scan_history(repo: Path, terms: list[bytes], findings: list[dict], allow: set[str],
-                 data_dirs: list[str], max_objects: int) -> tuple[int, int]:
+                 data_dirs: list[str], max_objects: int,
+                 lfs_state: dict | None = None, notes: list[str] | None = None) -> tuple[int, int]:
+    lfs_state = lfs_state if lfs_state is not None else {}
     if not git(repo, "rev-list", "--all", "--max-count=1").strip():
         return 0, 0
     out = git(repo, "rev-list", "--all", "--objects")
@@ -400,15 +497,20 @@ def scan_history(repo: Path, terms: list[bytes], findings: list[dict], allow: se
         if not path:
             continue
         if path.startswith(b'"'):
-            continue  # quoted C-style path: handled by the tree scan, rare in history
+            # git quotes a path holding a quote, a backslash or a control character even with
+            # core.quotePath=false. Skipping these dropped every historical version of such a file
+            # — and a file deleted later has no tree entry left to catch it.
+            path = unquote_c_style(path)
         blob_paths.setdefault(sha.decode(), set()).add(path.decode("utf-8", "replace"))
-    if len(blob_paths) > max_objects:
-        print(f"warning: {len(blob_paths)} objects exceed --max-objects {max_objects}; "
-              f"history scan is partial", file=sys.stderr)
     all_shas = sorted(blob_paths)
     kinds = batch_check(repo, all_shas)
     blobs_all = [sha for sha in all_shas if kinds.get(sha, ("", 0))[0] == "blob"]
     truncated = len(blobs_all) > max_objects
+    if truncated:
+        # Count blobs, not the tree objects that `rev-list --objects` also prints: a warning that
+        # fires while the exit code stays 0 reads as "partial but fine", which is the worst of both.
+        print(f"warning: {len(blobs_all)} blobs exceed --max-objects {max_objects}; "
+              f"the history scan is partial", file=sys.stderr)
     blobs = blobs_all[:max_objects]
     wanted = [sha for sha in blobs if kinds[sha][1] <= LARGE_BLOB_BYTES]
     for sha in blobs:
@@ -429,8 +531,11 @@ def scan_history(repo: Path, terms: list[bytes], findings: list[dict], allow: se
                 if candidate.startswith(directory.rstrip("/") + "/"):
                     add(findings, "sensitive-file", where, f"inside data directory {directory}")
                     break
-        scan_content(data, where, terms, findings,
-                     skip_paths=all(candidate in allow for candidate in paths))
+        if is_lfs_pointer(data):
+            scan_lfs_pointer(repo, data, where, terms, findings, lfs_state)
+        else:
+            scan_content(data, where, terms, findings,
+                         skip_paths=all(candidate in allow for candidate in paths))
     return len(blobs), truncated
 
 
@@ -463,12 +568,53 @@ def scan_unreachable(repo: Path, terms: list[bytes], findings: list[dict], allow
     if truncated:
         print(f"warning: {len(unreachable)} unreachable blob(s) exceed --max-objects {max_objects}; "
               f"the dangling scan is partial", file=sys.stderr)
-    batch = [sha for sha, _size in sorted(unreachable)[:max_objects]]
+    skipped_large = 0
+    batch = []
+    for sha, size in sorted(unreachable)[:max_objects]:
+        if size > LARGE_BLOB_BYTES:
+            skipped_large += 1
+            continue
+        batch.append(sha)
     contents = batch_blobs(repo, batch)
     for sha, data in contents.items():
-        where = f"unreachable: {sha[:12]}"
-        scan_content(data, where, terms, findings, skip_paths=False)
-    return len(contents), truncated
+        scan_content(data, f"unreachable-blob: {sha[:12]}", terms, findings, skip_paths=False)
+    if skipped_large:
+        add(findings, "unreachable", "unreachable",
+            f"{skipped_large} unreachable blob(s) larger than {LARGE_BLOB_BYTES} bytes are not scanned")
+
+    # An amended or rebased commit is not in the blob list: its identity and message still leak.
+    unreachable_commits = []
+    for line in listing.decode("utf-8", "replace").splitlines():
+        parts = line.split()
+        if len(parts) == 3 and parts[1] == "commit" and parts[0] not in reachable:
+            unreachable_commits.append(parts[0])
+    for sha in sorted(unreachable_commits)[:max_objects]:
+        meta = git(repo, "log", "-1", "--format=%an%x1f%ae%x1f%cn%x1f%ce%x1f%B", sha, check=False)
+        text = meta.decode("utf-8", "replace")
+        fields = text.split("\x1f")
+        if len(fields) < 5:
+            continue
+        for name, email in ((fields[0], fields[1]), (fields[2], fields[3])):
+            low = email.lower().encode()
+            if low and not placeholder_email(low):
+                add(findings, "unreachable", f"unreachable-commit: {sha[:12]}",
+                    f"{name} <{email}> is not a placeholder")
+        if fields[4].strip():
+            scan_content(fields[4].encode(), f"unreachable-commit: {sha[:12]}", terms, findings)
+    return len(contents) + len(unreachable_commits), truncated
+
+
+def placeholder_email(low: bytes) -> bool:
+    """One rule for every place an email is judged: asset placeholders, noreply senders, and the
+    reserved documentation domains. Three copies of this drifted apart before."""
+    if not low:
+        return True
+    if low.endswith(b"@localhost") or b"noreply" in low or b"no-reply" in low:
+        return True
+    domain = low.rsplit(b"@", 1)[-1]
+    if any(low.endswith(b"@" + blocked) for blocked in PLACEHOLDER_EMAIL_DOMAINS):
+        return True
+    return domain.startswith(b"example.") or domain.endswith((b".example", b".test", b".invalid"))
 
 
 def scan_identities(repo: Path, terms: list[bytes], findings: list[dict]) -> int:
@@ -481,13 +627,11 @@ def scan_identities(repo: Path, terms: list[bytes], findings: list[dict]) -> int
             pairs.add((fields[2], fields[3]))
     for name, email in sorted(pairs):
         low = email.lower().encode()
-        if low and not (low.endswith(b"@localhost") or b"noreply" in low
-                        or any(low.endswith(b"@" + domain) for domain in PLACEHOLDER_EMAIL_DOMAINS)):
+        if low and not placeholder_email(low):
             add(findings, "commit-identity", "commit", f"{name} <{email}> is not a placeholder")
-        for term in terms:
-            if term.lower() in name.lower().encode() or term.lower() in low:
-                add(findings, "commit-identity", "commit",
-                    f"author identity contains the term {term.decode('utf-8', 'replace')}")
+        for term in term_hits(name.lower().encode(), terms) + term_hits(low, terms):
+            add(findings, "commit-identity", "commit",
+                f"author identity contains the term {term.decode('utf-8', 'replace')}")
     return len(pairs)
 
 
@@ -512,13 +656,13 @@ def scan_commit_messages(repo: Path, terms: list[bytes], findings: list[dict],
 
 def scan_remote_urls(repo: Path, findings: list[dict]) -> int:
     """A token baked into a remote URL lives in .git/config, so the file scan never sees it."""
-    out = git(repo, "config", "--get-regexp", r"^remote\..*\.url", check=False)
+    out = git(repo, "config", "--get-regexp", r"^(remote|submodule)\..*\.url", check=False)
     count = 0
     for line in out.decode("utf-8", "replace").splitlines():
         count += 1
         _key, _, url = line.partition(" ")
         if REMOTE_CRED_RE.search(url.encode()):
-            add(findings, "remotes", "git-config", "remote URL carries a password or token")
+            add(findings, "remotes", "git-config", f"{_key} carries a password or token")
     return count
 
 
@@ -534,46 +678,130 @@ def scan_tags(repo: Path, terms: list[bytes], findings: list[dict]) -> int:
     """An annotated tag carries its own tagger identity and message, separate from any commit.
     `git log` never shows them, so a tag made before the author email was anonymised still
     publishes the real name on the repository's Tags page."""
+    # A NUL after each record: a tag message is multi-line, and splitting the whole output on
+    # newlines silently dropped every line after the first — the leak lived on line 3.
     out = git(repo, "for-each-ref", "refs/tags",
-              "--format=%(refname:short)%1f%(taggername)%1f%(taggeremail)%1f%(contents)")
+              "--format=%(refname:short)%1f%(objecttype)%1f%(taggername)%1f%(taggeremail)"
+              "%1f%(contents)%00")
     count = 0
-    for line in out.decode("utf-8", "replace").splitlines():
-        name, _, rest = line.partition("\x1f")
-        tagger_name, _, rest = rest.partition("\x1f")
-        tagger_email, _, message = rest.partition("\x1f")
-        if not tagger_name and not message.strip():
-            continue  # lightweight tag: only points at a commit, nothing of its own to leak
+    for record in out.split(b"\x00"):
+        if not record.strip():
+            continue
+        fields = record.decode("utf-8", "replace").lstrip("\n").split("\x1f", 4)
+        if len(fields) < 5:
+            continue
+        name, object_type, tagger_name, tagger_email, message = fields
+        if object_type != "tag":
+            continue  # lightweight tag: only a pointer, the commit scan already covered it
         count += 1
         where = f"tag: {name}"
-        if tagger_name or tagger_email:
-            email = tagger_email.strip("<> ")
-            low = email.lower().encode()
-            if email and not (low.endswith(b"@localhost") or b"noreply" in low
-                              or any(low.endswith(b"@" + d) for d in PLACEHOLDER_EMAIL_DOMAINS)):
-                add(findings, "commit-identity", where, f"tagger {tagger_name} <{email}> is not a placeholder")
-            for term in terms:
-                if term.lower() in tagger_name.lower().encode() or term.lower() in low:
-                    add(findings, "commit-identity", where,
-                        f"tagger contains the term {term.decode('utf-8', 'replace')}")
+        email = tagger_email.strip("<> ")
+        low_email = email.lower().encode()
+        if email and not placeholder_email(low_email):
+            add(findings, "commit-identity", where,
+                f"tagger {tagger_name} <{email}> is not a placeholder")
+        for term in term_hits(tagger_name.lower().encode(), terms) + term_hits(low_email, terms):
+            add(findings, "commit-identity", where,
+                f"tagger contains the term {term.decode('utf-8', 'replace')}")
         if message.strip():
             scan_content(message.encode(), f"tag-message: {name}", terms, findings)
     return count
 
 
-def check_lfs(repo: Path, notes: list[str]) -> None:
-    attributes = repo / ".gitattributes"
-    if not attributes.is_file() or attributes.is_symlink():
+LFS_OID = re.compile(rb"oid sha256:([0-9a-f]{64})")
+LFS_SIZE = re.compile(rb"size (\d+)")
+
+
+def parse_lfs_pointer(data: bytes) -> tuple[str, int] | None:
+    head = data[:400]
+    oid = LFS_OID.search(head)
+    if not oid:
+        return None
+    size = LFS_SIZE.search(head)
+    return oid.group(1).decode(), int(size.group(1)) if size else -1
+
+
+def lfs_object_path(repo: Path, oid: str) -> Path | None:
+    """<git-common-dir>/lfs/objects/<aa>/<bb>/<oid>, without starting a `git lfs` process."""
+    common = git(repo, "rev-parse", "--git-common-dir", check=False).strip().decode("utf-8", "replace")
+    if not common:
+        return None
+    base = Path(common)
+    if not base.is_absolute():
+        base = (repo / base).resolve()
+    return base / "lfs" / "objects" / oid[:2] / oid[2:4] / oid
+
+
+def scan_lfs_pointer(repo: Path, data: bytes, where: str, terms: list[bytes],
+                     findings: list[dict], state: dict) -> None:
+    """Scan the real bytes behind a pointer when they are on this machine.
+
+    A pointer proves nothing about the content; a missing object proves nothing either. So: read the
+    object when it exists (text only), record binary ones, and let a missing one close the gate
+    unless the caller passed --skip-lfs.
+    """
+    parsed = parse_lfs_pointer(data)
+    if parsed is None:
+        return
+    oid, size = parsed
+    path = lfs_object_path(repo, oid)
+    state["lfs"] = state.get("lfs", 0) + 1
+    if path is None or not path.is_file():
+        state.setdefault("lfs_missing", []).append(f"{where} sha256:{oid[:12]}")
         return
     try:
-        text = attributes.read_text(encoding="utf-8", errors="replace")
+        if size > MAX_TEXT_BYTES:
+            state["lfs_binary"] = state.get("lfs_binary", 0) + 1
+            return
+        blob = path.read_bytes()
     except OSError:
+        state.setdefault("lfs_missing", []).append(f"{where} sha256:{oid[:12]}")
         return
-    if "filter=lfs" in text:
-        notes.append("this repository uses Git LFS: pointer files are reported, their real content is "
-                     "never read by this scanner")
+    # 8 KB is enough to tell text from binary; images and video stop here.
+    if is_binary(blob[:8000]):
+        state["lfs_binary"] = state.get("lfs_binary", 0) + 1
+        return
+    state["lfs_scanned"] = state.get("lfs_scanned", 0) + 1
+    scan_content(blob, f"{where} (lfs sha256:{oid[:12]})", terms, findings)
 
 
-def scan_untracked(repo: Path, findings: list[dict]) -> int:
+def check_lfs(repo: Path, notes: list[str]) -> None:
+    """Every .gitattributes level, plus .git/info/attributes — a filter declared in a subdirectory
+    converts those files too, and a rule that only reads the root file misses it."""
+    paths = [line.decode("utf-8", "replace")
+             for line in git(repo, "ls-files", "-z", "*.gitattributes").split(b"\x00") if line]
+    extra = repo / ".git" / "info" / "attributes"
+    texts: list[str] = []
+    for name in paths:
+        candidate = repo / name
+        if candidate.is_symlink() or not candidate.is_file():
+            continue
+        try:
+            texts.append(candidate.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+    if extra.is_file() and not extra.is_symlink():
+        try:
+            texts.append(extra.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            pass
+    joined = "\n".join(texts)
+    if "filter=lfs" in joined:
+        notes.append("this repository uses Git LFS: pointer files are resolved against "
+                     ".git/lfs/objects; an object that is not on this machine closes the gate")
+    for name in ("filter=git-crypt", "filter=gitcrypt", "filter=crypt"):
+        if name in joined:
+            notes.append(f".gitattributes declares {name}: those files reach the scanner already "
+                         f"transformed, so only the encrypted bytes were read")
+
+
+def scan_untracked(repo: Path, findings: list[dict], terms: list[bytes] | None = None,
+                   data_dirs: list[str] | None = None) -> int:
+    """Files git has not been told about yet.
+
+    A name-only check missed the obvious case: `todo.txt` holding a key, or a real name in notes the
+    user simply has not committed. `git add -A` would take it, so the content is read here too.
+    """
     out = git(repo, "status", "--porcelain=v1", "-z", "--untracked-files=all")
     count = 0
     for record in out.split(b"\x00"):
@@ -581,7 +809,26 @@ def scan_untracked(repo: Path, findings: list[dict]) -> int:
             continue
         path = record[3:].decode("utf-8", "replace")
         count += 1
-        check_path_name(path, findings, f"untracked: {path}")
+        where = f"untracked: {path}"
+        check_path_name(path, findings, where, category="untracked-file")
+        for directory in data_dirs or []:
+            if path.startswith(directory.rstrip("/") + "/"):
+                add(findings, "untracked-file", where, f"inside data directory {directory}")
+                break
+        if terms is None:
+            continue
+        target = repo / path
+        if target.is_symlink() or not target.is_file():
+            continue
+        try:
+            if target.stat().st_size > MAX_TEXT_BYTES:
+                add(findings, "untracked-file", where, "too large to scan before it is ever committed")
+                continue
+            data = target.read_bytes()
+        except OSError:
+            add(findings, "untracked-file", where, "could not be read before it is ever committed")
+            continue
+        scan_content(data, where, terms, findings)
     return count
 
 
@@ -603,16 +850,18 @@ def check_gitignore(repo: Path, notes: list[str]) -> None:
     except OSError as exc:
         notes.append(f".gitignore could not be read ({exc.__class__.__name__}): skipped the ignore review")
         return
+    active = [line.strip() for line in text.splitlines()
+              if line.strip() and not line.lstrip().startswith(("#", "!"))]
     for pattern, why in [(".env", "credentials file"), ("*.pem", "private key"),
                          ("*.key", "private key")]:
-        if pattern not in text:
-            notes.append(f".gitignore does not mention {pattern} ({why})")
+        if not any(line.startswith(pattern) for line in active):
+            # `!env` or a commented-out line used to satisfy a plain substring check.
+            notes.append(f".gitignore does not ignore {pattern} ({why})")
 
 
 # ---------------------------------------------------------------- report
 
-def report(findings: list[dict], notes: list[str], terms_count: int, terms_source: str,
-           stats: dict[str, int]) -> int:
+def dedupe(findings: list[dict]) -> list[dict]:
     unique: list[dict] = []
     seen: set[tuple] = set()
     for finding in findings:
@@ -621,16 +870,24 @@ def report(findings: list[dict], notes: list[str], terms_count: int, terms_sourc
             continue
         seen.add(key)
         unique.append(finding)
-    findings = unique
+    return unique
 
+
+def report(findings: list[dict], notes: list[str], terms_count: int, terms_source: str,
+           stats: dict[str, int]) -> int:
     grouped: dict[str, list[dict]] = {}
     for finding in findings:
         grouped.setdefault(finding["category"], []).append(finding)
 
     print(f"privacy-preflight {VERSION}")
     print(f"  terms: {terms_count} from {terms_source}")
+    extra = ""
+    if "unreachable" in stats:
+        extra += f", unreachable: {stats['unreachable']} objects"
+    if stats.get("lfs"):
+        extra += f", lfs: {stats['lfs']} object(s)"
     print(f"  tree: {stats.get('tree', 0)} files, history: {stats.get('history', 0)} blobs, "
-          f"identities: {stats.get('identities', 0)}, untracked: {stats.get('untracked', 0)}")
+          f"identities: {stats.get('identities', 0)}, untracked: {stats.get('untracked', 0)}{extra}")
     for category in CATEGORY_ORDER + [key for key in grouped if key not in CATEGORY_ORDER]:
         items = grouped.get(category)
         if not items:
@@ -785,8 +1042,12 @@ def selftest() -> int:
         subprocess.run(["git", "add", "-A"], cwd=str(lfs), capture_output=True, check=True)
         commit(lfs, "init")
         proc = run("--repo", str(lfs))
-        expect("a Git LFS pointer is reported, not silently trusted",
-               proc.returncode == 1 and "Git LFS pointer" in proc.stdout, proc)
+        expect("a Git LFS pointer whose object is missing closes the gate (exit 2)",
+               proc.returncode == 2 and "Git LFS object(s) are not on this machine" in proc.stderr,
+               proc)
+        proc = run("--repo", str(lfs), "--skip-lfs")
+        expect("--skip-lfs downgrades a missing LFS object to a note",
+               proc.returncode == 0 and "skipped (--skip-lfs)" in proc.stdout, proc)
 
         dangling = make_repo(base / "dangling")
         write(dangling, "cfg.py", f'KEY = "{fake_key}"\n')
@@ -956,6 +1217,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="also read privacy.allow / privacy.ignore / privacy.dataDirs from the "
                              "scanned repository's own .git/config; a hostile repository can use "
                              "that to silence itself, so it is off by default")
+    parser.add_argument("--skip-lfs", action="store_true",
+                        help="do not fail when a Git LFS object is missing locally (shallow CI "
+                             "clones); missing objects are then reported as a note only")
     parser.add_argument("--dangling", action="store_true",
                         help="also scan objects no ref points at (amended commits, rebased branches); "
                              "never pushed, but still in .git — use it before flipping to public")
@@ -1003,33 +1267,36 @@ def main(argv: list[str] | None = None) -> int:
                   file=sys.stderr)
             return 2
     allow = {normalize_path(path) for path in args.allow}
-    scope = None if args.trust_repo_config else "--global"
-    if scope:
-        allow.update(normalize_path(path) for path in config_values(repo, "privacy.allow"))
-        args.ignore = list(args.ignore) + config_values(repo, "privacy.ignore")
-    else:
-        allow.update(normalize_path(path) for path in config_values(repo, "privacy.allow", scope="--local"))
-        args.ignore = list(args.ignore) + config_values(repo, "privacy.ignore", scope="--local")
+    # Global settings always apply. A repository's own config is *added* only when the caller opts
+    # in — it used to replace the global values, which silently dropped every global allow/ignore.
+    scopes = ["--global"] + (["--local"] if args.trust_repo_config else [])
+    for scope in scopes:
+        allow.update(normalize_path(path) for path in config_values(repo, "privacy.allow", scope=scope))
+        args.ignore = list(args.ignore) + config_values(repo, "privacy.ignore", scope=scope)
     data_dirs = [part.strip() for part in args.data_dirs.split(",") if part.strip()]
-    for value in config_values(repo, "privacy.dataDirs", scope=scope or "--local"):
-        data_dirs.extend(part.strip() for part in value.split(",") if part.strip())
+    for scope in scopes:
+        for value in config_values(repo, "privacy.dataDirs", scope=scope):
+            data_dirs.extend(part.strip() for part in value.split(",") if part.strip())
 
     findings: list[dict] = []
     notes: list[str] = []
     stats: dict[str, int] = {}
 
     truncated = False
+    lfs_state: dict = {}
     if args.staged:
         staged_out = git(repo, "diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z")
         staged_paths = [record.decode("utf-8", "replace")
                         for record in staged_out.split(b"\x00") if record]
-        stats["tree"] = scan_index(repo, terms, findings, allow, data_dirs, staged_paths)
+        stats["tree"] = scan_index(repo, terms, findings, allow, data_dirs, staged_paths,
+                                   notes=notes, lfs_state=lfs_state)
         notes.append("staged only: history, identities, tags, messages and remotes are NOT scanned")
     else:
-        stats["tree"] = scan_index(repo, terms, findings, allow, data_dirs)
+        stats["tree"] = scan_index(repo, terms, findings, allow, data_dirs, notes=notes,
+                                   lfs_state=lfs_state)
         if not args.no_history:
             stats["history"], truncated = scan_history(repo, terms, findings, allow, data_dirs,
-                                                       args.max_objects)
+                                                       args.max_objects, lfs_state, notes)
         stats["identities"] = scan_identities(repo, terms, findings)
         stats["tags"] = scan_tags(repo, terms, findings)
         stats["messages"] = scan_commit_messages(repo, terms, findings, allow)
@@ -1037,11 +1304,19 @@ def main(argv: list[str] | None = None) -> int:
             stats["unreachable"], dangling_truncated = scan_unreachable(
                 repo, terms, findings, allow, data_dirs, args.max_objects)
             if dangling_truncated:
+                # Same rule as the history scan: a partial scan may not report clean.
                 notes.append("the dangling scan stopped at --max-objects: results are partial")
+                truncated = True
+            if stats["unreachable"]:
+                notes.append("objects no ref points at are local only (a normal push never sends "
+                             "them); purge with: git reflog expire --expire=now --all && "
+                             "git gc --prune=now")
         stats["remotes"] = scan_remote_urls(repo, findings)
-        stats["untracked"] = scan_untracked(repo, findings)
+        stats["untracked"] = scan_untracked(repo, findings, terms, data_dirs)
         check_gitignore(repo, notes)
         check_lfs(repo, notes)
+
+    findings = dedupe(findings)   # before --ignore and before --report, so counts cannot disagree
 
     if args.ignore:
         try:
@@ -1050,9 +1325,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: an --ignore pattern is not a valid regex: {exc}", file=sys.stderr)
             return 2
         before = len(findings)
+        def subject(finding: dict) -> str:
+            location = finding["where"]
+            if finding["line"]:
+                location = f"{location}:{finding['line']}"
+            return f"{finding['category']} {location} {finding['detail']}"
+
         findings = [finding for finding in findings
-                    if not any(pattern.search(f"{finding['category']} {finding['where']} {finding['detail']}")
-                               for pattern in patterns)]
+                    if not any(pattern.search(subject(finding)) for pattern in patterns)]
         dropped = before - len(findings)
         if dropped:
             notes.append(f"{dropped} finding(s) dropped by --ignore")
@@ -1060,11 +1340,32 @@ def main(argv: list[str] | None = None) -> int:
                 # Everything was suppressed: say so loudly rather than reporting a silent clean.
                 notes.append("WARNING: --ignore removed every finding of this run")
 
+    if lfs_state.get("lfs"):
+        stats["lfs"] = lfs_state["lfs"]
+        notes.append(f"Git LFS: {lfs_state.get('lfs_scanned', 0)} object(s) scanned, "
+                     f"{lfs_state.get('lfs_binary', 0)} binary skipped")
+    missing_lfs = lfs_state.get("lfs_missing") or []
+    if missing_lfs:
+        preview = ", ".join(missing_lfs[:3])
+        if args.skip_lfs:
+            notes.append(f"{len(missing_lfs)} Git LFS object(s) are not on this machine and were "
+                         f"skipped (--skip-lfs): {preview}")
+        else:
+            notes.append(f"{len(missing_lfs)} Git LFS object(s) are not on this machine, so their "
+                         f"content was never read: {preview}")
+            truncated = True
+
     source = str(terms_file) if terms_file else "no terms file"
     exit_code = report(findings, notes, terms_count, source, stats)
+    lfs_missing = lfs_state.get("lfs_missing") or []
     if truncated:
-        print("error: the history scan stopped at --max-objects, so it cannot say 'clean'; "
-              "raise the limit and run again", file=sys.stderr)
+        print("error: a scan stopped before covering everything (see the notes), so this run "
+              "cannot say 'clean'; raise --max-objects and run again", file=sys.stderr)
+    if lfs_missing and not args.skip_lfs:
+        print(f"error: {len(lfs_missing)} Git LFS object(s) are not on this machine, so their "
+              f"content was never read; run 'git lfs fetch --all' or pass --skip-lfs",
+              file=sys.stderr)
+    if truncated or (lfs_missing and not args.skip_lfs):
         exit_code = 2
 
     if args.report:

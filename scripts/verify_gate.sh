@@ -26,6 +26,7 @@ to_native() {
 if [ -z "${PRIVACY_TERMS_FILE:-}" ] && [ ! -f "$HOME/.config/privacy-preflight/terms.txt" ] \
    && [ ! -f "$HOME/.privacy-preflight/terms.txt" ]; then
   terms_probe="$(mktemp "${TMPDIR:-/tmp}/privacy-terms-XXXXXX")"
+  trap 'rm -f "$terms_probe"' EXIT
   printf 'verifyprobe%s\n' "identifier" > "$terms_probe"
   export PRIVACY_TERMS_FILE="$(to_native "$terms_probe")"
   printf '  note  no terms list on this machine: this run uses a throwaway one\n'
@@ -90,6 +91,22 @@ elif grep -q "DO NOT PUBLISH" "$work/push1.log"; then
 else
   bad "the push failed, but not because the scanner reported the credential — read the log"
   sed -n '1,20p' "$work/push1.log"
+fi
+
+printf '\n== 4b. the push gate sees a leak that only exists in history\n'
+# Step 4 leaves config.py in the index, so the index scan alone would block it and prove nothing
+# about the history scan. Remove it, commit the removal with --no-verify, then push: the only
+# place left holding the credential is the earlier commit.
+git -C "$work_native/leaky" rm -q config.py
+git -C "$work_native/leaky" "${ident[@]}" commit -q --no-verify -m "remove config" \
+  >"$work/commit3.log" 2>&1 || bad "could not commit the removal (setup problem)"
+if git -C "$work_native/leaky" push -q origin HEAD:main >"$work/push1b.log" 2>&1; then
+  bad "push of a leak that lives only in history succeeded — the history scan is not running"
+elif grep -q "DO NOT PUBLISH" "$work/push1b.log"; then
+  ok "push blocked by the history scan, with the credential gone from the index"
+else
+  bad "the push failed, but not because the scanner reported the credential — read the log"
+  sed -n '1,20p' "$work/push1b.log"
 fi
 
 printf '\n== 5. a clean repository pushes normally\n'

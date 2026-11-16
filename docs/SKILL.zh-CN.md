@@ -175,8 +175,16 @@ git config --global --add privacy.ignore 'tests/fixtures/.*canary' # 你确认�
 绿灯只有在看过红灯之后才有意义。
 
 ```bash
-python <skill>/scripts/privacy_scan.py --selftest    # 21 个合成 canary，全部是假数据
+python <skill>/scripts/privacy_scan.py --selftest    # 27 个合成 canary，全部是假数据
 bash   <skill>/scripts/verify_gate.sh                # 真的 commit 与 push 一次，确认被拦
+```
+
+五支测试目前的输出（本机实测，换机器可能因数据量不同）：
+
+```
+selftest: 27/27 passed          canary_battery: 11/11
+terms_guard: 0 offending         docs_sync: 6 file(s) consistent
+llm_packet: 5/5 properties hold  verify_gate: 8 passed, 0 failed
 ```
 
 `verify_gate.sh` 会建临时 bare remote，实际跑 `git commit` 与 `git push`：泄露的必须被拒且日志里要有

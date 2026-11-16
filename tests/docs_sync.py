@@ -21,7 +21,7 @@ CATEGORIES = [
 ]
 FLAGS = ["--require-terms", "--trust-repo-config", "--report", "--selftest", "--dangling"]
 TOKENS = ["llm_review_context.py", "references/llm-review.md"]  # the second layer must be documented
-NUMBERS = ["27/27", "15/15", "8 passed", "6 file(s)", "5/5"]
+NUMBERS = ["28/28", "15/15", "8 passed", "6 file(s)", "5/5"]
 
 DOCS = ["README.md", "README.zh-TW.md", "README.zh-CN.md"]
 SPECS = ["SKILL.md", "docs/SKILL.en.md", "docs/SKILL.zh-CN.md"]
@@ -47,7 +47,7 @@ def main() -> int:
         for flag in FLAGS:
             if flag not in text:
                 problems.append(f"{name}: flag '{flag}' is not mentioned")
-        for number in ["27/27", "6 file(s)"]:
+        for number in ["28/28", "6 file(s)"]:
             if number not in text:
                 problems.append(f"{name}: expected result '{number}' is not stated")
         for referenced in set(re.findall(r"references/[A-Za-z0-9_.-]+\.md", text)):
@@ -75,7 +75,7 @@ def main() -> int:
         for flag in FLAGS:
             if flag not in text:
                 problems.append(f"{name}: flag '{flag}' is not mentioned")
-        for number in ["27/27", "6 file(s)"]:
+        for number in ["28/28", "6 file(s)"]:
             if number not in text:
                 problems.append(f"{name}: expected result '{number}' is not stated")
         for referenced in set(re.findall(r"references/[A-Za-z0-9_.-]+\.md", text)):

@@ -1035,6 +1035,15 @@ def selftest() -> int:
                proc.returncode == 1 and "certs/dist.pem" in proc.stdout, proc)
         expect(".env.dist is treated as a template", ".env.dist" not in proc.stdout, proc)
 
+        subdir = make_repo(base / "subdir")
+        (base / "subdir" / "src").mkdir()
+        write(subdir, "src/.env", "TOKEN=placeholder\n")
+        write(subdir, "src/app.py", "def main():\n    return 1\n")
+        subprocess.run(["git", "add", "-A"], cwd=str(subdir), capture_output=True, check=True)
+        proc = run("--repo", ".", "--staged", cwd=str(base / "subdir" / "src"))
+        expect("--staged from a subdirectory still scans the whole index",
+               proc.returncode == 1 and "src/.env" in proc.stdout, proc)
+
         lfs = make_repo(base / "lfs")
         (base / "lfs" / "asset.bin").write_text(
             "version https://git-lfs.github.com/spec/"
@@ -1241,6 +1250,12 @@ def main(argv: list[str] | None = None) -> int:
         return selftest()
 
     repo = Path(args.repo).resolve()
+    top = git(repo, "rev-parse", "--show-toplevel", check=False).strip()
+    if top:
+        # Without this, running from `repo/src` scanned only `src`: `git ls-files` lists paths
+        # relative to the cwd, while `git diff --cached` uses the repository root, so --staged
+        # matched nothing and the run reported clean.
+        repo = Path(top.decode("utf-8", "replace")).resolve()
     try:
         git(repo, "rev-parse", "--is-inside-work-tree")
     except (RuntimeError, OSError) as exc:

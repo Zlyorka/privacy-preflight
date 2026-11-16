@@ -162,7 +162,7 @@ git 版本都原樣輸出，後者避免 `git status` 去執行被掃 repo 自�
 `--selftest` 為每個類別造一個合成 canary，漏抓任何一個就失敗：
 
 ```bash
-python scripts/privacy_scan.py --selftest    # selftest: 27/27 passed
+python scripts/privacy_scan.py --selftest    # selftest: 28/28 passed
 ```
 
 `verify_gate.sh` 建一個臨時 repo、commit 一個假憑證，並要求 commit 是**因為掃描器報出來**才被擋 ——

@@ -162,7 +162,7 @@ git 版本都原样输出，后者避免 `git status` 去执行被扫仓库自�
 `--selftest` 为每个类别造一个合成 canary，漏抓任何一个就失败：
 
 ```bash
-python scripts/privacy_scan.py --selftest    # selftest: 27/27 passed
+python scripts/privacy_scan.py --selftest    # selftest: 28/28 passed
 ```
 
 `verify_gate.sh` 建一个临时仓库、commit 一个假凭证，并要求 commit 是**因为扫描器报出来**才被拦 ——

@@ -175,7 +175,7 @@ the scanned repository's own `.git/config`.
 `--selftest` builds synthetic canaries for every category and fails if one is missed:
 
 ```bash
-python scripts/privacy_scan.py --selftest    # selftest: 27/27 passed
+python scripts/privacy_scan.py --selftest    # selftest: 28/28 passed
 ```
 
 `verify_gate.sh` creates a temporary repository, commits a fake credential, and asserts that the

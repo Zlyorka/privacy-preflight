@@ -13,6 +13,7 @@
 一次安装、所有仓库生效，设置留在 `$PRIVACY_PREFLIGHT_HOME`（默认 `~/.privacy-preflight`）与 git config。
 
 ```bash
+python <skill>/scripts/llm_review_context.py --repo .   # 第二层：片段包
 python <skill>/scripts/privacy_scan.py --repo .          # 审计：工作区、索引、每一颗 commit
 bash   <skill>/scripts/install_global_hook.sh            # 一次安装，之后每个仓库都受管
 bash   <skill>/scripts/verify_gate.sh                    # 端到端证明：泄露的 push 真的被拦
@@ -177,6 +178,8 @@ git config --global --add privacy.ignore 'tests/fixtures/.*canary' # 你确认�
 ```bash
 python <skill>/scripts/privacy_scan.py --selftest    # 27 个合成 canary，全部是假数据
 bash   <skill>/scripts/verify_gate.sh                # 真的 commit 与 push 一次，确认被拦
+python tests/canary_battery.py                       # battery: 15/15
+python tests/terms_guard.py                          # 0 offending
 ```
 
 五支测试目前的输出（本机实测，换机器可能因数据量不同）：
@@ -195,6 +198,7 @@ llm_packet: 5/5 properties hold  verify_gate: 8 passed, 0 failed
 1. `git status` 干净、`privacy_scan.py --repo .` 退出码 0。
 2. 先推到 **private** 仓库，在 GitHub 的文件清单里用陌生人的眼睛看一遍路径。
 3. 再改 public。改完用匿名请求确认 `raw.githubusercontent.com` 读得到（private 会让 catalog 与安装流程无声失败）。
+4. 把公开网址 clone 到临时目录再跑一次测试：你机器上的设置不会跟着仓库走，陌生人那一次才是真的。
 
 ## 它抓不到什么
 
@@ -242,4 +246,5 @@ llm_packet: 5/5 properties hold  verify_gate: 8 passed, 0 failed
 ## 参考
 
 - `references/leak-recovery.md`：已经泄露之后的处理顺序。
+- `references/llm-review.md`：第二层的完整做法 —— 片段包、问法、验收、记录。
 - 相关 skill：`pre-public-repo-review`（发布流程与历史改写）、`secret-hygiene`（密钥轮替）。

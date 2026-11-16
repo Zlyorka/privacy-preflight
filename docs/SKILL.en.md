@@ -17,6 +17,7 @@ puts the scanner inside the project is wrong. Install once, every repository is 
 stay in `$PRIVACY_PREFLIGHT_HOME` (default `~/.privacy-preflight`) and in git config.
 
 ```bash
+python <skill>/scripts/llm_review_context.py --repo .   # layer two: the packet
 python <skill>/scripts/privacy_scan.py --repo .          # audit: working tree, index, every commit
 bash   <skill>/scripts/install_global_hook.sh            # install once, covered from then on
 bash   <skill>/scripts/verify_gate.sh                    # end-to-end proof: a leaky push is blocked
@@ -200,6 +201,8 @@ A green light means nothing until the red one has been seen.
 ```bash
 python <skill>/scripts/privacy_scan.py --selftest    # 27 synthetic canaries, all fake
 bash   <skill>/scripts/verify_gate.sh                # a real commit and push, and both are blocked
+python tests/canary_battery.py                       # battery: 15/15
+python tests/terms_guard.py                          # 0 offending
 ```
 
 The five tests print, on this machine:
@@ -279,5 +282,6 @@ clean one must pass. Eight steps green means the machine has a gate.
 ## References
 
 - `references/leak-recovery.md`: what to do, in order, after a leak.
+- `references/llm-review.md`: the second layer in full — packet, prompt, acceptance, record keeping.
 - Related skills: `pre-public-repo-review` (publishing flow and history rewriting), `secret-hygiene`
   (key rotation).

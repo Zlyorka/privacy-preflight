@@ -197,7 +197,7 @@ machine-readable report.
 A green light means nothing until the red one has been seen.
 
 ```bash
-python <skill>/scripts/privacy_scan.py --selftest    # 21 synthetic canaries, all fake
+python <skill>/scripts/privacy_scan.py --selftest    # 23 synthetic canaries, all fake
 bash   <skill>/scripts/verify_gate.sh                # a real commit and push, and both are blocked
 ```
 

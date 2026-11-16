@@ -154,7 +154,7 @@ git 版本都原样输出，后者避免 `git status` 去执行被扫仓库自�
 `--selftest` 为每个类别造一个合成 canary，漏抓任何一个就失败：
 
 ```bash
-python scripts/privacy_scan.py --selftest    # selftest: 21/21 passed
+python scripts/privacy_scan.py --selftest    # selftest: 23/23 passed
 ```
 
 `verify_gate.sh` 建一个临时仓库、commit 一个假凭证，并要求 commit 是**因为扫描器报出来**才被拦 ——
@@ -183,6 +183,12 @@ python tests/terms_guard.py                  # 14 term(s) checked, 0 offending
 
 ```bash
 python tests/docs_sync.py                    # docs sync: 3 file(s) consistent
+```
+
+`tests/llm_packet.py` 守着片段包生成器：回报格式在任何预算下都留着、被略过的文件一定会被点名、packet 不会落进被扫的仓库。
+
+```bash
+python tests/llm_packet.py                   # llm packet: 4/4 properties hold
 ```
 
 没看过红灯的绿灯，不算通过。

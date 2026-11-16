@@ -21,7 +21,7 @@ CATEGORIES = [
 ]
 FLAGS = ["--require-terms", "--trust-repo-config", "--report", "--selftest"]
 TOKENS = ["llm_review_context.py", "references/llm-review.md"]  # the second layer must be documented
-NUMBERS = ["21", "11/11", "8 passed"]
+NUMBERS = ["23", "11/11", "8 passed"]
 
 DOCS = ["README.md", "README.zh-TW.md", "README.zh-CN.md"]
 SPECS = ["SKILL.md", "docs/SKILL.en.md", "docs/SKILL.zh-CN.md"]

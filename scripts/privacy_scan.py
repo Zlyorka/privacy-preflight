@@ -191,6 +191,23 @@ def term_hits(text_lower: bytes, terms: list[bytes]) -> list[bytes]:
 
 # ---------------------------------------------------------------- content scan
 
+def to_utf8(data: bytes) -> bytes:
+    """Legacy Chinese text (Big5/CP950) is not UTF-8, and decoded as UTF-8 it becomes mojibake no
+    term can match — a repository full of old `.txt` files scanned clean. Try the encodings a
+    Taiwanese or Windows user actually has, in order, and keep the first that decodes."""
+    try:
+        data.decode("utf-8")
+        return data
+    except UnicodeDecodeError:
+        pass
+    for encoding in ("cp950", "big5", "cp1252"):
+        try:
+            return data.decode(encoding).encode("utf-8")
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return data
+
+
 def scan_content(data: bytes, where: str, terms: list[bytes], findings: list[dict],
                  *, skip_paths: bool = False) -> None:
     if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
@@ -202,6 +219,7 @@ def scan_content(data: bytes, where: str, terms: list[bytes], findings: list[dic
             return
     if is_binary(data):
         return
+    data = to_utf8(data)
     seen: set[tuple[int, str]] = set()
     for name, pattern in SECRETS:
         for match in pattern.finditer(data):
@@ -505,10 +523,23 @@ def scan_untracked(repo: Path, findings: list[dict]) -> int:
 
 
 def check_gitignore(repo: Path, notes: list[str]) -> None:
-    if not (repo / ".gitignore").exists():
+    path = repo / ".gitignore"
+    if not path.exists():
         notes.append("no .gitignore: nothing stops a stray .env or key file from being added")
         return
-    text = (repo / ".gitignore").read_text(encoding="utf-8", errors="replace")
+    if path.is_symlink() or not path.is_file():
+        # A directory or a symlink here used to raise, and the traceback exited 1 — a crash
+        # reported as findings. Say what happened instead of guessing.
+        notes.append(".gitignore is a symlink or not a regular file: skipped the ignore review")
+        return
+    try:
+        if path.stat().st_size > 1_000_000:
+            notes.append(".gitignore is over 1 MB: skipped the ignore review")
+            return
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        notes.append(f".gitignore could not be read ({exc.__class__.__name__}): skipped the ignore review")
+        return
     for pattern, why in [(".env", "credentials file"), ("*.pem", "private key"),
                          ("*.key", "private key")]:
         if pattern not in text:
@@ -683,6 +714,24 @@ def selftest() -> int:
         expect("dist.pem is not mistaken for a template file",
                proc.returncode == 1 and "certs/dist.pem" in proc.stdout, proc)
         expect(".env.dist is treated as a template", ".env.dist" not in proc.stdout, proc)
+
+        legacy = make_repo(base / "legacy")
+        (base / "legacy" / "about.txt").write_bytes(
+            f"作者：{fake_term}\n".encode("cp950"))
+        subprocess.run(["git", "add", "-A"], cwd=str(legacy), capture_output=True, check=True)
+        commit(legacy, "init")
+        proc = run("--repo", str(legacy), "--term", fake_term)
+        expect("a Big5/CP950 file is decoded instead of read as mojibake",
+               proc.returncode == 1 and "identity-term" in proc.stdout, proc)
+
+        weird = make_repo(base / "weird")
+        write(weird, "a.txt", "nothing to see\n")
+        subprocess.run(["git", "add", "-A"], cwd=str(weird), capture_output=True, check=True)
+        commit(weird, "init")
+        (base / "weird" / ".gitignore").mkdir()  # a crash used to exit 1, reading as "findings"
+        proc = run("--repo", str(weird))
+        expect("an unreadable .gitignore is a note, not a traceback",
+               proc.returncode == 0 and "Traceback" not in proc.stderr, proc)
 
         silenced = make_repo(base / "silenced")
         write(silenced, "config.py", f'KEY = "{fake_key}"\n')
@@ -939,4 +988,16 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except SystemExit:
+        raise
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except Exception as exc:  # noqa: BLE001 - the exit code matters more than the exception type
+        # A crash used to surface as exit 1, which reads as "findings", and --report never got
+        # written. Exit 2 means "could not scan", which is what a traceback actually is.
+        print(f"error: the scan could not finish: {exc.__class__.__name__}: {exc}", file=sys.stderr)
+        print("error: exit 2 means the scan did not run to completion — do not read this as clean",
+              file=sys.stderr)
+        sys.exit(2)

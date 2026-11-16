@@ -65,7 +65,7 @@ python /tmp/pp/scripts/privacy_scan.py --repo .
 python scripts/privacy_scan.py --repo .                     # 稽核
 python scripts/privacy_scan.py --repo . --report out.json    # 機器可讀報告
 python scripts/privacy_scan.py --repo . --require-terms      # 沒有條款清單就拒絕執行
-python scripts/privacy_scan.py --selftest                    # 21 個合成 canary
+python scripts/privacy_scan.py --selftest                    # 23 個合成 canary
 ```
 
 退出碼：`0` 乾淨、`1` 有 finding、`2` 掃不起來。
@@ -154,7 +154,7 @@ git 版本都原樣輸出，後者避免 `git status` 去執行被掃 repo 自�
 `--selftest` 為每個類別造一個合成 canary，漏抓任何一個就失敗：
 
 ```bash
-python scripts/privacy_scan.py --selftest    # selftest: 21/21 passed
+python scripts/privacy_scan.py --selftest    # selftest: 23/23 passed
 ```
 
 `verify_gate.sh` 建一個臨時 repo、commit 一個假憑證，並要求 commit 是**因為掃描器報出來**才被擋 ——
@@ -183,6 +183,12 @@ python tests/terms_guard.py                  # 14 term(s) checked, 0 offending
 
 ```bash
 python tests/docs_sync.py                    # docs sync: 3 file(s) consistent
+```
+
+`tests/llm_packet.py` 守著片段包產生器：回報格式在任何預算下都留著、被略過的檔案一定會被點名、packet 不會落進被掃的 repo。
+
+```bash
+python tests/llm_packet.py                   # llm packet: 4/4 properties hold
 ```
 
 沒看過紅燈的綠燈，不算通過。

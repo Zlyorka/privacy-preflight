@@ -1,11 +1,12 @@
 """Guard the second layer's packet builder.
 
-Three properties matter and each one broke once while the builder was being written:
+Four properties matter and each one broke once while the builder was being written:
 
 1. the report format survives any budget — cutting the assembled string at the end dropped it,
    leaving the reviewer with examples but no instructions,
 2. a file that does not fit is named, never silently missing,
-3. the packet never lands inside the repository it describes.
+3. the packet never lands inside the repository it describes,
+4. a text file too large to read is named in the packet, never silently absent.
 
 Run from the repository root:  python tests/llm_packet.py
 Exit 0 when all three hold; 1 otherwise.
@@ -59,6 +60,22 @@ def main() -> int:
         if "did not fit" not in text and "omitted at the packet budget" not in text:
             problems.append("a file was dropped without naming it in the packet")
 
+        # A text file too large to read must be named, not silently absent.
+        big = base / "big"
+        big.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=str(big), check=True, capture_output=True)
+        subprocess.run(["git", "config", "core.hooksPath", str(big / ".no-hooks")], cwd=str(big),
+                       check=True, capture_output=True)
+        (big / "notes.md").write_text("我住某地\n" * 120_000, encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=str(big), check=True, capture_output=True)
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@localhost", "commit", "-q",
+                        "-m", "init"], cwd=str(big), check=True, capture_output=True)
+        big_out = base / "big.md"
+        run(["--repo", str(big), "--out", str(big_out)], {"PRIVACY_PREFLIGHT_HOME": str(home)})
+        big_text = big_out.read_text(encoding="utf-8") if big_out.is_file() else ""
+        if "exceed" not in big_text:
+            problems.append("a text file over the size limit was skipped without being named")
+
         # No --out: the default must be outside the repository.
         proc = run(["--repo", str(repo)], {"PRIVACY_PREFLIGHT_HOME": str(home)})
         produced = list((home / "packets").glob("*.md")) if (home / "packets").is_dir() else []
@@ -77,7 +94,7 @@ def main() -> int:
     if problems:
         print(f"llm packet: {len(problems)} problem(s)")
         return 1
-    print("llm packet: 3/3 properties hold")
+    print("llm packet: 4/4 properties hold")
     return 0
 
 

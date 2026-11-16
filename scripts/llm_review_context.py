@@ -43,6 +43,10 @@ TEXT_EXT = {
     ".cfg", ".sh", ".bash", ".ps1", ".sql", ".csv", ".html", ".css", ".java", ".go", ".rs", ".rb",
     ".php", ".kt", ".swift", ".c", ".h", ".cpp", ".cs", ".env", ".conf", ".lock",
 }
+# `@` means a decorator in code, not a contact detail; letting it score code files pushed the
+# scripts ahead of the documents a reviewer actually needs.
+CODE_EXT = {".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".go", ".rs", ".rb", ".php", ".kt",
+            ".swift", ".c", ".h", ".cpp", ".cs", ".sh", ".bash", ".ps1", ".sql"}
 RISKY_PATH = re.compile(
     r"(test|spec|fixture|sample|demo|doc|readme|note|todo|changelog|about|profile|resume|履歷|"
     r"工作日誌|會議|紀錄|log)", re.IGNORECASE)
@@ -98,6 +102,7 @@ def main() -> int:
         return 2
 
     records = []
+    too_large: list[str] = []
     for name in names:
         path = repo / name
         suffix = path.suffix.lower()
@@ -107,12 +112,17 @@ def main() -> int:
             data = path.read_bytes()
         except OSError:
             continue
-        if is_binary(data) or len(data) > MAX_FILE:
+        if len(data) > MAX_FILE and suffix in TEXT_EXT:
+            too_large.append(f"{name} ({len(data) // 1024} KB)")
+            continue
+        if is_binary(data):
             continue
         text = data.decode("utf-8", "replace")
         lines = text.splitlines()
         hits = {}
         for cue, pattern in CUES:
+            if cue == "contact" and suffix in CODE_EXT:
+                continue
             count = sum(1 for line in lines if pattern.search(line))
             if count:
                 hits[cue] = count
@@ -130,6 +140,12 @@ def main() -> int:
                 "terms. Read the excerpts below for **meaning**: a place, a school, an employer, a client,\n"
                 "a schedule, a person, a story that identifies the author without any literal a rule could\n"
                 "match. Report only what you can cite by `path:line`.\n")
+    if too_large:
+        shown = ", ".join(f"`{item}`" for item in too_large[:5])
+        more = f" and {len(too_large) - 5} more" if len(too_large) > 5 else ""
+        head.append(f"\n> {len(too_large)} text file(s) exceed {MAX_FILE // 1000} KB and were not "
+                    f"read for this pass: {shown}{more}. Review them by hand if they are "
+                    f"documentation or notes.\n")
     head.append("## Selected files\n")
     head.append("| File | Bytes | Cues |\n|---|---|---|\n")
     for record in chosen:

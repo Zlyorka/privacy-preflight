@@ -148,7 +148,7 @@ git config --global --add privacy.ignore 'tests/fixtures/.*canary'  # 你確認�
 綠燈只有在看過紅燈之後才有意義。
 
 ```bash
-python <skill>/scripts/privacy_scan.py --selftest    # 21 個合成 canary，全部是假資料
+python <skill>/scripts/privacy_scan.py --selftest    # 23 個合成 canary，全部是假資料
 bash   <skill>/scripts/verify_gate.sh                # 真的 commit 與 push 一次，確認被擋
 python tests/canary_battery.py                       # 每類種一個 canary，種在臨時副本裡
 python tests/terms_guard.py                          # 這個 repo 不含清單上的任何一個字

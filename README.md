@@ -68,7 +68,7 @@ Use `--force` to take over a `core.hooksPath` that is already set, and `--uninst
 python scripts/privacy_scan.py --repo .                     # audit
 python scripts/privacy_scan.py --repo . --report out.json    # machine-readable report
 python scripts/privacy_scan.py --repo . --require-terms      # refuse to run without a terms list
-python scripts/privacy_scan.py --selftest                    # 21 synthetic canaries
+python scripts/privacy_scan.py --selftest                    # 23 synthetic canaries
 ```
 
 Exit codes: `0` clean, `1` findings, `2` the scan could not run.
@@ -164,7 +164,7 @@ the scanned repository's own `.git/config`.
 `--selftest` builds synthetic canaries for every category and fails if one is missed:
 
 ```bash
-python scripts/privacy_scan.py --selftest    # selftest: 21/21 passed
+python scripts/privacy_scan.py --selftest    # selftest: 23/23 passed
 ```
 
 `verify_gate.sh` creates a temporary repository, commits a fake credential, and asserts that the
@@ -194,6 +194,12 @@ version, the same twelve category names and the same commands.
 
 ```bash
 python tests/docs_sync.py                    # docs sync: 3 file(s) consistent
+```
+
+`python tests/llm_packet.py` guards the packet builder: the report format survives any budget, an omitted file is always named, and the packet never lands inside the repository.
+
+```bash
+python tests/llm_packet.py                   # llm packet: 4/4 properties hold
 ```
 
 A green scan means nothing until the scan has been seen to fail.
